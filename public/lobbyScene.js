@@ -85,7 +85,7 @@ export default class LobbyScene extends Phaser.Scene {
         errorDiv.textContent = "Veuillez entrer un code de salle valide";
         return;
       }
-      this.game.socket.emit("joinRoom", { roomId, playerName: this.playerName }, (res) => {
+      this.game.socket.emit("joinRoom", { roomId, playerName: this.playerName, peerId: this.game.peerId }, (res) => {
         if (res.success) {
           this.scene.start("GameScene", { roomId, playerName: this.playerName, isHost: false });
         } else {
@@ -96,7 +96,7 @@ export default class LobbyScene extends Phaser.Scene {
 
     createBtn.onclick = () => {
       const livesVal = rootEle.querySelector("#livesVal").value.trim() || "3";
-      this.game.socket.emit("createRoom", { hostName: this.playerName, lives: livesVal }, (res) => {
+      this.game.socket.emit("createRoom", { hostName: this.playerName, lives: livesVal, peerId: this.game.peerId }, (res) => {
         if (res.success) {
           const { roomId } = res;
           this.scene.start("GameScene", { roomId, playerName: this.playerName, isHost: true });

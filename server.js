@@ -3,11 +3,27 @@ const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const { PeerServer } = require('peer');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+// Configuration du serveur PeerJS
+const peerServer = PeerServer({
+  port: 9000,
+  path: '/myapp'
+});
+
+// Logging pour debug
+peerServer.on('connection', (client) => {
+  console.log('Nouvelle connexion PeerJS:', client.id);
+});
+
+peerServer.on('error', (error) => {
+  console.error('Erreur PeerServer:', error);
+});
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -96,7 +112,7 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("playerListUpdate", { players: rooms[roomId].players });
   });
 
-  socket.on("joinRoom", ({ roomId, playerName }, cb) => {
+  socket.on("joinRoom", ({ roomId, playerName, peerId }, cb) => {
     roomId = roomId.toUpperCase();
     const room = rooms[roomId];
     if (!room) {
@@ -116,7 +132,8 @@ io.on("connection", (socket) => {
       id: socket.id,
       name,
       lives: room.settings.lives,
-      isAlive: true
+      isAlive: true,
+      peerId: peerId
     });
     socket.join(roomId);
     console.log(`${name} joined room ${roomId}`);
@@ -128,6 +145,13 @@ io.on("connection", (socket) => {
     roomId = roomId.toUpperCase();
     const room = rooms[roomId];
     if (!room || room.status !== "lobby") return;
+
+    // Vérifier qu'il y a au moins 2 joueurs
+    if (room.players.length < 2) {
+      socket.emit("gameError", { message: "Il faut au moins 2 joueurs pour commencer la partie." });
+      return;
+    }
+
     room.status = "playing";
     room.currentPrompt = generatePrompt();
     room.currentPlayerIndex = 0;
@@ -201,11 +225,15 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const bombTime = randomInt(room.settings.minBombTime, room.settings.maxBombTime);
+    // Augmenter le temps minimum pour mieux percevoir l'accélération
+    const minTime = 10; // Au moins 10 secondes
+    const maxTime = 20; // Maximum 20 secondes
+    const bombTime = randomInt(minTime, maxTime);
 
     io.to(roomId).emit("turnStarted", {
       currentPlayerId: currentPlayer.id,
-      prompt: room.currentPrompt
+      prompt: room.currentPrompt,
+      bombTime: bombTime
     });
 
     room.bombTimer = setTimeout(() => {
