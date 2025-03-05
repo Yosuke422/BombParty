@@ -1,0 +1,15 @@
+{
+  "name": "bomb-party-clone",
+  "version": "1.0.0",
+  "description": "JKLM Bomb Party style game with Node, Socket.io, Phaser, dictionary API for word checks",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.1",
+    "socket.io": "^4.5.4",
+    "uuid": "^9.0.0"
+  }
+}

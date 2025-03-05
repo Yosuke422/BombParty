@@ -1,0 +1,90 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #1e1f29;
+  font-family: sans-serif;
+  color: #fff;
+}
+
+#game-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.lobby-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(30,31,41,0.95);
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+  width: 300px;
+}
+
+.lobby-container h1 {
+  margin-bottom: 16px;
+}
+
+.lobby-container input,
+.lobby-container button {
+  display: block;
+  margin: 10px auto;
+  padding: 8px;
+}
+
+.lobby-container button {
+  background-color: #4b53ff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.lobby-container button:hover {
+  background-color: #6b75ff;
+}
+
+.error-message {
+  color: #ff5555;
+  min-height: 20px;
+  margin-top: 10px;
+}
+
+.word-input-container {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30,31,41,0.8);
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.word-input-container input {
+  padding: 6px;
+  font-size: 16px;
+  width: 200px;
+  border-radius: 4px;
+  border: 1px solid #333;
+  outline: none;
+}
+
+.word-input-container button {
+  padding: 6px 10px;
+  margin-left: 8px;
+  font-size: 16px;
+  background-color: #4b53ff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #fff;
+}
+
+.word-input-container button:hover {
+  background-color: #6b75ff;
+}
