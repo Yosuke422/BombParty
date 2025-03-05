@@ -1,7 +1,7 @@
 {
-  "name": "bomb-party-clone",
+  "name": "bomb-party",
   "version": "1.0.0",
-  "description": "JKLM Bomb Party style game with Node, Socket.io, Phaser, dictionary API for word checks",
+  "description": "",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

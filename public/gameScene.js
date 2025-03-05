@@ -7,7 +7,7 @@ export default class GameScene extends Phaser.Scene {
     this.roomId = data.roomId;
     this.playerName = data.playerName;
     this.isHost = data.isHost;
-    this.socket = this.game.socket;
+    this.socket = this.game.socket
     this.peer = this.game.peer;
     this.peerConnections = new Map();
     this.tickTimer = null;
@@ -72,7 +72,6 @@ export default class GameScene extends Phaser.Scene {
     this.centerX = this.cameras.main.centerX;
     this.centerY = this.cameras.main.centerY;
 
-    // Conteneur pour le code de la salle et bouton copier
     const roomCodeContainer = this.add.dom(this.centerX, 20).createFromHTML(`
       <div class="room-code-container">
         <span class="room-code">Code de la salle: ${this.roomId}</span>
@@ -80,7 +79,6 @@ export default class GameScene extends Phaser.Scene {
       </div>
     `);
 
-    // Fonctionnalité de copie
     const copyBtn = roomCodeContainer.node.querySelector('.copy-button');
     copyBtn.onclick = () => {
       navigator.clipboard.writeText(this.roomId)
@@ -93,7 +91,6 @@ export default class GameScene extends Phaser.Scene {
         .catch(err => console.error('Erreur lors de la copie:', err));
     };
 
-    // Initialiser les sons
     this.explosionSound = this.sound.add('explosionSound', { volume: 1 });
     this.tickSound = this.sound.add('tickSound', { volume: 0.5, loop: false });
 
@@ -106,32 +103,29 @@ export default class GameScene extends Phaser.Scene {
     this.turnArrow.setVisible(false);
     this.currentWord = "";
 
-    // Création du conteneur de saisie du mot
-    this.wordInputContainer = this.add.dom(this.centerX, this.centerY + 120).createFromHTML(`
+    const wordInputContainer = this.add.dom(this.centerX, this.centerY + 120).createFromHTML(`
       <div class="word-input">
-        <label>Entrez un mot contenant la syllabe</label>
         <input type="text" id="wordInput" placeholder="Tapez votre mot ici" autocomplete="off">
       </div>
     `);
 
-    const wordInput = this.wordInputContainer.node.querySelector('#wordInput');
+    const wordInput = wordInputContainer.node.querySelector('#wordInput');
     
-    // Gestion de l'input clavier
     wordInput.addEventListener('keydown', (event) => {
       if (this.currentTurnPlayerId !== this.socket.id) {
-        wordInput.blur();
+        wordInput.blur(); 
         return;
       }
+
       if (event.key === "Enter") {
         const word = wordInput.value.trim();
         if (word.length > 0) {
           this.socket.emit("submitWord", { roomId: this.roomId, word: word });
-          wordInput.value = "";
+          wordInput.value = ""; 
         }
       }
     });
 
-    // Activation/désactivation de l'input selon le tour
     this.socket.on("turnStarted", (payload) => {
       const { currentPlayerId, prompt, bombTime } = payload;
       this.currentTurnPlayerId = currentPlayerId;
@@ -149,7 +143,6 @@ export default class GameScene extends Phaser.Scene {
       this.updateArrowPosition();
     });
 
-    // Bouton START pour l'hôte
     if (this.isHost) {
       this.startBtn = this.add.text(40, 40, "[START GAME]", {
         fontSize: '16px',
@@ -168,7 +161,6 @@ export default class GameScene extends Phaser.Scene {
     this.listenForSocketEvents();
     this.socket.emit("getPlayerList", this.roomId);
 
-    // Particules d'explosion et de confettis (configuration inchangée)
     this.explosionEmitter = this.add.particles(0, 0, 'spark', {
       lifespan: 800,
       speed: { min: -400, max: 400 },
@@ -180,6 +172,7 @@ export default class GameScene extends Phaser.Scene {
       tint: [0xFF5733, 0xFFC300, 0xFF0000],
       emitting: false
     });
+
     this.confettiEmitter = this.add.particles(0, 0, 'confetti', {
       lifespan: 4000,
       speed: { min: -200, max: 200 },
@@ -192,8 +185,6 @@ export default class GameScene extends Phaser.Scene {
       emitting: false,
       rotate: { min: -180, max: 180 }
     });
-
-    // Bouton de test pour le chat P2P
     this.add.text(10, 550, "[Test P2P]", {
       fontSize: '16px',
       backgroundColor: '#4b53ff',
@@ -300,7 +291,7 @@ export default class GameScene extends Phaser.Scene {
       this.tickSound.stop();
     }
   }
-
+  
   listenForSocketEvents() {
     this.socket.on("playerListUpdate", (data) => {
       this.updatePlayerList(data.players);
@@ -318,12 +309,7 @@ export default class GameScene extends Phaser.Scene {
       
       console.log("Liste des joueurs mise à jour:", data.players);
       
-      // Pour chaque joueur distant, établir une connexion si elle n'existe pas déjà
       data.players.forEach(player => {
-        // On ne crée la connexion que si :
-        // • Ce n'est pas nous-même
-        // • Aucune connexion n'existe déjà
-        // • Le joueur a un peerId
         if (
           player.id !== this.socket.id &&
           !this.peerConnections.has(player.id) &&
@@ -363,7 +349,6 @@ export default class GameScene extends Phaser.Scene {
             conn.on('open', () => {
               console.log('Connexion établie avec:', player.name);
               this.peerConnections.set(player.id, conn);
-              // Envoyer un message de test une fois la connexion ouverte
               const messageData = {
                 type: 'chat',
                 sender: this.playerName,
@@ -401,6 +386,7 @@ export default class GameScene extends Phaser.Scene {
       const input = this.wordInputContainer.node.querySelector('#wordInput');
       this.flashText(input, '#FF0000');
     });
+    
 
     this.socket.on("nextTurn", (data) => {
       const { currentPlayerId, prompt } = data;
@@ -474,7 +460,9 @@ export default class GameScene extends Phaser.Scene {
       const angle = angleStep * i - Math.PI / 2; 
       const px = this.centerX + radius * Math.cos(angle);
       const py = this.centerY + radius * Math.sin(angle);
-      let label = `${p.name}\nLives: ${p.lives}`;
+
+      const hearts = "❤️".repeat(p.lives);
+      let label = `${p.name}\n${hearts}`;
       if (!p.isAlive) {
         label += "\n(ELIM)";
       }
@@ -483,7 +471,8 @@ export default class GameScene extends Phaser.Scene {
         color: '#fff',
         align: 'center'
       }).setOrigin(0.5);
-      pText.playerId = p.id;
+
+      pText.playerId = p.id;  
       this.playerTextObjects.push(pText);
     }
     this.updateArrowPosition();
@@ -494,15 +483,26 @@ export default class GameScene extends Phaser.Scene {
       this.turnArrow.setVisible(false);
       return;
     }
-    const obj = this.playerTextObjects.find(t => t.playerId === this.currentTurnPlayerId);
-    if (!obj) {
+    
+    const playerText = this.playerTextObjects.find(
+      t => t.playerId === this.currentTurnPlayerId
+    );
+    
+    if (!playerText) {
       this.turnArrow.setVisible(false);
       return;
     }
-    this.turnArrow.setPosition(obj.x - 30, obj.y);
+    
+    const leftEdge = playerText.x - playerText.width / 2;
+    const topEdge = playerText.y - playerText.height / 2;
+    
+    const arrowX = leftEdge - 20;          
+    const arrowY = topEdge + 8;             
+    
+    this.turnArrow.setPosition(arrowX, arrowY);
     this.turnArrow.setVisible(true);
   }
-
+  
   flashText(domElement, color) {
     const originalColor = domElement.style.color;
     this.tweens.add({
@@ -514,7 +514,7 @@ export default class GameScene extends Phaser.Scene {
       onComplete: () => { domElement.style.color = originalColor; }
     });
   }
-
+  
   addChatMessage(sender, message, time = new Date().toLocaleTimeString()) {
     const chatMessages = document.querySelector('.chat-messages');
     const messageElement = document.createElement('div');

@@ -38,9 +38,16 @@ function generateRoomCode() {
 }
 
 function generatePrompt() {
-  const prompts = [ "ar", "be", "co", "ing", "pre", "tion", "que", "st", "tri", "com", "re", "str" ];
+  const prompts = [
+    "ar", "be", "co", "in", "ex", "re", "st", "un", "de", "ab",
+    "ad", "an", "as", "at", "if", "of", "on", "or", "to", "up",
+    "ly", "ed", "en", "ic", "al", "er", "nt", "ma", "pa", "si",
+    "li", "go", "lo", "me", "by", "id", "am", "it", "ox", "pi",
+    "ce", "ra", "ch", "pr", "di", "fi", "nu", "vi", "ta", "mi"
+  ];
   return prompts[Math.floor(Math.random() * prompts.length)];
 }
+
 
 async function validateWord(word, prompt, usedWords) {
   const lower = word.toLowerCase().trim();
@@ -146,7 +153,6 @@ io.on("connection", (socket) => {
     const room = rooms[roomId];
     if (!room || room.status !== "lobby") return;
 
-    // Vérifier qu'il y a au moins 2 joueurs
     if (room.players.length < 2) {
       socket.emit("gameError", { message: "Il faut au moins 2 joueurs pour commencer la partie." });
       return;
@@ -217,17 +223,17 @@ io.on("connection", (socket) => {
   function startTurn(roomId) {
     const room = rooms[roomId];
     if (!room) return;
-    checkForGameOver(roomId); 
-
+  
+    if (checkForGameOver(roomId)) return;
+  
     const currentPlayer = room.players[room.currentPlayerIndex];
     if (!currentPlayer.isAlive) {
       moveToNextTurn(roomId);
       return;
     }
 
-    // Augmenter le temps minimum pour mieux percevoir l'accélération
-    const minTime = 10; // Au moins 10 secondes
-    const maxTime = 20; // Maximum 20 secondes
+    const minTime = 10; 
+    const maxTime = 20; 
     const bombTime = randomInt(minTime, maxTime);
 
     io.to(roomId).emit("turnStarted", {
@@ -235,10 +241,10 @@ io.on("connection", (socket) => {
       prompt: room.currentPrompt,
       bombTime: bombTime
     });
-
+  
     room.bombTimer = setTimeout(() => {
       currentPlayer.lives -= 1;
-    
+      
       if (currentPlayer.lives <= 0) {
         currentPlayer.isAlive = false;
         io.to(roomId).emit("playerEliminated", { playerId: currentPlayer.id });
@@ -248,21 +254,19 @@ io.on("connection", (socket) => {
           remainingLives: currentPlayer.lives
         });
       }
-    
+      
       io.to(roomId).emit("playerListUpdate", { players: room.players });
-    
       moveToNextTurn(roomId);
     }, bombTime * 1000);
-    
   }
 
   function moveToNextTurn(roomId) {
     const room = rooms[roomId];
     if (!room) return;
     clearTimeout(room.bombTimer);
-
-    checkForGameOver(roomId);
-
+  
+    if (checkForGameOver(roomId)) return;
+  
     let nextIndex = (room.currentPlayerIndex + 1) % room.players.length;
     let safeCount = 0;
     while (!room.players[nextIndex].isAlive && safeCount < room.players.length) {
@@ -270,26 +274,29 @@ io.on("connection", (socket) => {
       safeCount++;
     }
     room.currentPlayerIndex = nextIndex;
-
+  
     room.currentPrompt = generatePrompt();
     io.to(roomId).emit("nextTurn", {
       currentPlayerId: room.players[room.currentPlayerIndex].id,
       prompt: room.currentPrompt
     });
+    
     startTurn(roomId);
   }
 
   function checkForGameOver(roomId) {
     const room = rooms[roomId];
-    if (!room) return;
-    if (room.status !== "playing") return;
-
+    if (!room) return true;
+    if (room.status !== "playing") return true;
+  
     const alivePlayers = room.players.filter(p => p.isAlive);
     if (alivePlayers.length <= 1) {
       room.status = "lobby";
       clearTimeout(room.bombTimer);
       const winnerName = alivePlayers[0]?.name || "No Winner";
       io.to(roomId).emit("gameOver", { winnerName });
+      return true;
     }
+    return false;
   }
 });

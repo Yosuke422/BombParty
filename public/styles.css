@@ -215,14 +215,12 @@ html, body {
   margin-top: 4px;
 }
 
-/* Style pour le champ de saisie des mots dans le jeu */
 .word-input {
   position: absolute;
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
   text-align: center;
-  background: rgba(0,0,0,0.5);
   padding: 15px;
   border-radius: 8px;
   width: 300px;
