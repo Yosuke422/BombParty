@@ -4,31 +4,71 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   create() {
-    this.createLobbyUI();
+    this.createNameUI();
   }
 
-  createLobbyUI() {
+  createNameUI() {
     const container = this.add.dom(
       this.cameras.main.centerX,
       this.cameras.main.centerY
     ).createFromHTML(`
-      <div class="lobby-container">
+      <div class="lobby-container" id="nameContainer">
         <h1>Bomb Party Clone</h1>
         
-        <label>Name:</label>
-        <input type="text" id="playerName" placeholder="Enter your name" />
+        <input type="text" id="playerName" placeholder="Entrez votre nom" />
+        <button id="confirmNameBtn">Confirmer</button>
 
-        <label>Room Code (to join):</label>
-        <input type="text" id="joinRoomId" placeholder="AB12CD" />
+        <div class="error-message" id="errorMsg"></div>
+      </div>
+    `);
 
-        <button id="joinRoomBtn">Join Room</button>
+    const rootEle = container.node;
+    const confirmBtn = rootEle.querySelector("#confirmNameBtn");
+    const errorDiv = rootEle.querySelector("#errorMsg");
+    const nameInput = rootEle.querySelector("#playerName");
 
-        <hr/>
+    confirmBtn.onclick = () => {
+      const playerName = nameInput.value.trim();
+      if (!playerName) {
+        errorDiv.textContent = "Veuillez entrer un nom";
+        return;
+      }
+      
+      // Stocker le nom et passer à l'écran suivant
+      this.playerName = playerName;
+      container.destroy();
+      this.createRoomUI();
+    };
+  }
 
-        <label>Lives (1-5):</label>
-        <input type="number" id="livesVal" value="3" min="1" max="5"/>
+  createRoomUI() {
+    const container = this.add.dom(
+      this.cameras.main.centerX,
+      this.cameras.main.centerY
+    ).createFromHTML(`
+      <div class="lobby-container" id="roomContainer">
+        <h1>Choisissez une option</h1>
+        
+        <div class="room-options">
+          <div class="create-room">
+            <h2>Créer une partie</h2>
+            <div class="input-group">
+              <label for="livesVal">Nombre de vies par joueur :</label>
+              <input type="number" id="livesVal" value="3" min="1" max="5"/>
+              <small class="input-help">Chaque joueur commence avec ce nombre de vies (1-5)</small>
+            </div>
+            <button id="createRoomBtn">Créer une partie</button>
+          </div>
 
-        <button id="createRoomBtn">Create Room</button>
+          <div class="join-room">
+            <h2>Rejoindre une partie</h2>
+            <div class="input-group">
+              <label for="joinRoomId">Code de la salle :</label>
+              <input type="text" id="joinRoomId" placeholder="Ex: ABC123" />
+            </div>
+            <button id="joinRoomBtn">Rejoindre</button>
+          </div>
+        </div>
 
         <div class="error-message" id="errorMsg"></div>
       </div>
@@ -40,31 +80,28 @@ export default class LobbyScene extends Phaser.Scene {
     const errorDiv = rootEle.querySelector("#errorMsg");
 
     joinBtn.onclick = () => {
-      const playerName = rootEle.querySelector("#playerName").value.trim() || "Player";
       const roomId = rootEle.querySelector("#joinRoomId").value.trim().toUpperCase();
       if (!roomId) {
-        errorDiv.textContent = "Please enter a valid room code.";
+        errorDiv.textContent = "Veuillez entrer un code de salle valide";
         return;
       }
-      this.game.socket.emit("joinRoom", { roomId, playerName }, (res) => {
+      this.game.socket.emit("joinRoom", { roomId, playerName: this.playerName }, (res) => {
         if (res.success) {
-          this.scene.start("GameScene", { roomId, playerName, isHost: false });
+          this.scene.start("GameScene", { roomId, playerName: this.playerName, isHost: false });
         } else {
-          errorDiv.textContent = res.message || "Cannot join room.";
+          errorDiv.textContent = res.message || "Impossible de rejoindre la salle";
         }
       });
     };
 
     createBtn.onclick = () => {
-      const playerName = rootEle.querySelector("#playerName").value.trim() || "Host";
       const livesVal = rootEle.querySelector("#livesVal").value.trim() || "3";
-
-      this.game.socket.emit("createRoom", { hostName: playerName, lives: livesVal }, (res) => {
+      this.game.socket.emit("createRoom", { hostName: this.playerName, lives: livesVal }, (res) => {
         if (res.success) {
           const { roomId } = res;
-          this.scene.start("GameScene", { roomId, playerName, isHost: true });
+          this.scene.start("GameScene", { roomId, playerName: this.playerName, isHost: true });
         } else {
-          errorDiv.textContent = "Failed to create room.";
+          errorDiv.textContent = "Échec de la création de la salle";
         }
       });
     };

@@ -18,6 +18,27 @@ export default class GameScene extends Phaser.Scene {
     this.centerX = this.cameras.main.centerX;
     this.centerY = this.cameras.main.centerY;
 
+    // Créer un conteneur pour le code de la salle et le bouton de copie
+    const roomCodeContainer = this.add.dom(this.centerX, 20).createFromHTML(`
+      <div class="room-code-container">
+        <span class="room-code">Code de la salle: ${this.roomId}</span>
+        <button class="copy-button" title="Copier le code">📋</button>
+      </div>
+    `);
+
+    // Ajouter la fonctionnalité de copie
+    const copyBtn = roomCodeContainer.node.querySelector('.copy-button');
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(this.roomId)
+        .then(() => {
+          copyBtn.textContent = '✓';
+          setTimeout(() => {
+            copyBtn.textContent = '📋';
+          }, 1000);
+        })
+        .catch(err => console.error('Erreur lors de la copie:', err));
+    };
+
     this.explosionSound = this.sound.add('explosionSound', {
       volume: 1
     });
@@ -38,10 +59,49 @@ export default class GameScene extends Phaser.Scene {
     this.turnArrow.setVisible(false);
 
     this.currentWord = "";
-    this.wordDisplay = this.add.text(this.centerX, this.centerY + 120, "", {
-      fontSize: '28px',
-      color: '#00ff00'
-    }).setOrigin(0.5);
+
+    // Remplacer la création du wordDisplay par un conteneur DOM avec input
+    const wordInputContainer = this.add.dom(this.centerX, this.centerY + 120).createFromHTML(`
+      <div class="word-input">
+        <label>Entrez un mot contenant la syllabe</label>
+        <input type="text" id="wordInput" placeholder="Tapez votre mot ici" autocomplete="off">
+      </div>
+    `);
+
+    const wordInput = wordInputContainer.node.querySelector('#wordInput');
+    
+    // Mettre à jour la gestion du clavier
+    wordInput.addEventListener('keydown', (event) => {
+      if (this.currentTurnPlayerId !== this.socket.id) {
+        wordInput.blur(); // Enlever le focus si ce n'est pas son tour
+        return;
+      }
+
+      if (event.key === "Enter") {
+        const word = wordInput.value.trim();
+        if (word.length > 0) {
+          this.socket.emit("submitWord", { roomId: this.roomId, word: word });
+          wordInput.value = ""; // Vider l'input après soumission
+        }
+      }
+    });
+
+    // Mettre à jour l'état du champ selon le tour
+    this.socket.on("turnStarted", (payload) => {
+      const { currentPlayerId, prompt } = payload;
+      this.currentTurnPlayerId = currentPlayerId;
+      this.promptText.setText(`Prompt: ${prompt}`);
+      
+      if (currentPlayerId === this.socket.id) {
+        wordInput.removeAttribute('disabled');
+        wordInput.focus();
+      } else {
+        wordInput.setAttribute('disabled', 'disabled');
+        wordInput.blur();
+      }
+      
+      this.updateArrowPosition();
+    });
 
     if (this.isHost) {
       this.startBtn = this.add.text(40, 40, "[START GAME]", {
@@ -59,7 +119,6 @@ export default class GameScene extends Phaser.Scene {
     this.playerTextObjects = [];
 
     this.listenForSocketEvents();
-    this.registerKeyboard();
     this.socket.emit("getPlayerList", this.roomId);
   }
 
@@ -74,31 +133,20 @@ export default class GameScene extends Phaser.Scene {
       this.updateArrowPosition();
     });
 
-    this.socket.on("turnStarted", (payload) => {
-      const { currentPlayerId, prompt } = payload;
-      this.currentTurnPlayerId = currentPlayerId;
-      this.promptText.setText(`Prompt: ${prompt}`);
-      this.currentWord = "";
-      this.wordDisplay.setText("");
-      this.updateArrowPosition();
-    });
-
     this.socket.on("wordAccepted", (info) => {
       if (info.playerId === this.socket.id) {
-        this.flashText(this.wordDisplay, '#00FF00');
+        this.flashText(this.wordInputContainer.node.querySelector('#wordInput'), '#00FF00');
       }
     });
 
     this.socket.on("wordInvalid", (info) => {
-      this.flashText(this.wordDisplay, '#FF0000');
+      this.flashText(this.wordInputContainer.node.querySelector('#wordInput'), '#FF0000');
     });
 
     this.socket.on("nextTurn", (data) => {
       const { currentPlayerId, prompt } = data;
       this.currentTurnPlayerId = currentPlayerId;
       this.promptText.setText(`Prompt: ${prompt}`);
-      this.currentWord = "";
-      this.wordDisplay.setText("");
       this.updateArrowPosition();
     });
 
@@ -109,7 +157,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.socket.on("playerEliminated", (data) => {
       if (data.playerId === this.socket.id) {
-        this.flashText(this.wordDisplay, '#FF0000');
+        this.flashText(this.wordInputContainer.node.querySelector('#wordInput'), '#FF0000');
       }
     });
 
@@ -119,23 +167,6 @@ export default class GameScene extends Phaser.Scene {
         fontSize: '28px',
         color: '#FFC600'
       }).setOrigin(0.5);
-    });
-  }
-
-  registerKeyboard() {
-    this.input.keyboard.on('keydown', (event) => {
-      if (this.currentTurnPlayerId !== this.socket.id) return;
-      if (event.key === "Enter") {
-        if (this.currentWord.length > 0) {
-          this.socket.emit("submitWord", { roomId: this.roomId, word: this.currentWord });
-        }
-      } else if (event.key === "Backspace") {
-        this.currentWord = this.currentWord.slice(0, -1);
-        this.wordDisplay.setText(this.currentWord);
-      } else if (/^[a-zA-Z]$/.test(event.key)) {
-        this.currentWord += event.key;
-        this.wordDisplay.setText(this.currentWord);
-      }
     });
   }
 
