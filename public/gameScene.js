@@ -13,18 +13,49 @@ export default class GameScene extends Phaser.Scene {
     this.tickTimer = null;
     this.currentBombTime = 0;
 
-    // Gérer les connexions entrantes
+    // Gestion des connexions entrantes (pour le host ou tous les pairs)
     this.peer.on('connection', (conn) => {
-      console.log('Nouvelle connexion P2P entrante');
-      
+      console.log('Nouvelle connexion P2P entrante de:', conn.peer);
+
+      // Configurer le canal de données
+      conn.peerConnection.addEventListener('datachannel', (event) => {
+        const channel = event.channel;
+        channel.binaryType = 'arraybuffer';
+      });
+
+      conn.on('data', (data) => {
+        let messageData = null;
+        // Si c'est un ArrayBuffer, on le décode et parse en JSON
+        if (data instanceof ArrayBuffer) {
+          const decoder = new TextDecoder();
+          const text = decoder.decode(data);
+          try {
+            messageData = JSON.parse(text);
+          } catch (e) {
+            console.error('Erreur de parsing (ArrayBuffer) :', e);
+            return;
+          }
+        } else if (typeof data === 'string') {
+          try {
+            messageData = JSON.parse(data);
+          } catch (e) {
+            console.error('Erreur de parsing (string) :', e);
+            return;
+          }
+        } else if (typeof data === 'object') {
+          messageData = data;
+        }
+  
+        console.log('Message reçu sur connexion entrante:', messageData);
+        if (messageData && messageData.type === 'chat') {
+          this.addChatMessage(messageData.sender, messageData.message, messageData.time);
+        }
+      });
+
       conn.on('open', () => {
         console.log('Connexion entrante ouverte');
-        // Stocker la connexion
+        // On stocke la connexion avec la clé correspondant au peerId distant
         this.peerConnections.set(conn.peer, conn);
-      });
-      
-      conn.on('data', (data) => {
-        console.log('Données P2P reçues:', data);
       });
     });
   }
@@ -62,34 +93,20 @@ export default class GameScene extends Phaser.Scene {
         .catch(err => console.error('Erreur lors de la copie:', err));
     };
 
-    // Initialiser les sons UNE SEULE FOIS
-    this.explosionSound = this.sound.add('explosionSound', {
-      volume: 1
-    });
+    // Initialiser les sons
+    this.explosionSound = this.sound.add('explosionSound', { volume: 1 });
+    this.tickSound = this.sound.add('tickSound', { volume: 0.5, loop: false });
 
-    this.tickSound = this.sound.add('tickSound', {
-      volume: 0.5,
-      loop: false
-    });
-
-    this.bombDisplay = this.add.text(this.centerX, this.centerY, "💣", {
-      fontSize: '64px'
-    }).setOrigin(0.5);
-
+    this.bombDisplay = this.add.text(this.centerX, this.centerY, "💣", { fontSize: '64px' }).setOrigin(0.5);
     this.promptText = this.add.text(this.centerX, this.centerY - 80, "Prompt: ???", {
       fontSize: '24px',
       color: '#FFC600'
     }).setOrigin(0.5);
-
-    this.turnArrow = this.add.text(0, 0, "►", {
-      fontSize: '24px',
-      color: '#FF0000'
-    });
+    this.turnArrow = this.add.text(0, 0, "►", { fontSize: '24px', color: '#FF0000' });
     this.turnArrow.setVisible(false);
-
     this.currentWord = "";
 
-    // Remplacer la création du wordDisplay par un conteneur DOM
+    // Création du conteneur de saisie du mot
     this.wordInputContainer = this.add.dom(this.centerX, this.centerY + 120).createFromHTML(`
       <div class="word-input">
         <label>Entrez un mot contenant la syllabe</label>
@@ -99,24 +116,22 @@ export default class GameScene extends Phaser.Scene {
 
     const wordInput = this.wordInputContainer.node.querySelector('#wordInput');
     
-    // Gestion du clavier
+    // Gestion de l'input clavier
     wordInput.addEventListener('keydown', (event) => {
-      // Empêcher la saisie si ce n'est pas le tour du joueur
       if (this.currentTurnPlayerId !== this.socket.id) {
         wordInput.blur();
         return;
       }
-
       if (event.key === "Enter") {
         const word = wordInput.value.trim();
         if (word.length > 0) {
           this.socket.emit("submitWord", { roomId: this.roomId, word: word });
-          wordInput.value = ""; // Vider l'input après soumission
+          wordInput.value = "";
         }
       }
     });
 
-    // Activer/désactiver l'input selon le tour
+    // Activation/désactivation de l'input selon le tour
     this.socket.on("turnStarted", (payload) => {
       const { currentPlayerId, prompt, bombTime } = payload;
       this.currentTurnPlayerId = currentPlayerId;
@@ -131,7 +146,6 @@ export default class GameScene extends Phaser.Scene {
         wordInput.blur();
         this.stopTickTimer();
       }
-      
       this.updateArrowPosition();
     });
 
@@ -146,19 +160,15 @@ export default class GameScene extends Phaser.Scene {
       .on('pointerdown', () => {
         this.socket.emit("startGame", this.roomId);
       });
-
-      // Désactiver le bouton par défaut
       this.startBtn.setTint(0x666666);
       this.startBtn.disableInteractive();
     }
 
     this.playerTextObjects = [];
-
-    // Événements Socket
     this.listenForSocketEvents();
     this.socket.emit("getPlayerList", this.roomId);
 
-    // Particules d'explosion
+    // Particules d'explosion et de confettis (configuration inchangée)
     this.explosionEmitter = this.add.particles(0, 0, 'spark', {
       lifespan: 800,
       speed: { min: -400, max: 400 },
@@ -170,8 +180,6 @@ export default class GameScene extends Phaser.Scene {
       tint: [0xFF5733, 0xFFC300, 0xFF0000],
       emitting: false
     });
-
-    // Particules de confettis
     this.confettiEmitter = this.add.particles(0, 0, 'confetti', {
       lifespan: 4000,
       speed: { min: -200, max: 200 },
@@ -185,7 +193,7 @@ export default class GameScene extends Phaser.Scene {
       rotate: { min: -180, max: 180 }
     });
 
-    // Ajouter un bouton de test pour le chat P2P
+    // Bouton de test pour le chat P2P
     this.add.text(10, 550, "[Test P2P]", {
       fontSize: '16px',
       backgroundColor: '#4b53ff',
@@ -193,60 +201,93 @@ export default class GameScene extends Phaser.Scene {
     })
     .setInteractive()
     .on('pointerdown', () => {
-      // Envoyer un message à tous les peers connectés
-      this.peerConnections.forEach((conn, playerId) => {
-        conn.send({
+      // Envoi d'un message de test à tous les pairs
+      this.peerConnections.forEach((conn) => {
+        const messageData = {
           type: 'chat',
-          message: `Message test de ${this.playerName} à ${new Date().toLocaleTimeString()}`
-        });
+          sender: this.playerName,
+          message: `Message test de ${this.playerName} à ${new Date().toLocaleTimeString()}`,
+          time: new Date().toLocaleTimeString()
+        };
+        conn.send(JSON.stringify(messageData));
       });
+    });
+
+    this.createChat();
+  }
+
+  createChat() {
+    const chatHTML = `
+      <div class="chat-container">
+        <div class="chat-messages"></div>
+        <div class="chat-input-container">
+          <input type="text" class="chat-input" placeholder="Tapez votre message...">
+        </div>
+      </div>
+    `;
+    const gameContainer = document.getElementById('game-container');
+    gameContainer.insertAdjacentHTML('beforeend', chatHTML);
+
+    const chatInput = document.querySelector('.chat-input');
+    chatInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && chatInput.value.trim()) {
+        const message = chatInput.value.trim();
+        chatInput.value = '';
+        
+        const messageData = {
+          type: 'chat',
+          sender: this.playerName,
+          message: message,
+          time: new Date().toLocaleTimeString()
+        };
+        this.addChatMessage(messageData.sender, messageData.message, messageData.time);
+        // Envoi aux pairs
+        this.peerConnections.forEach((conn) => {
+          if (conn.open) {
+            console.log('Envoi du message à:', conn.peer);
+            try {
+              conn.send(JSON.stringify(messageData));
+            } catch (err) {
+              console.error('Erreur lors de l\'envoi du message:', err);
+            }
+          }
+        });
+      }
     });
   }
 
-  // Gère la logique du timer de la bombe
   startTickTimer(bombTime) {
-    this.stopTickTimer(); // Au cas où un timer tourne déjà
+    this.stopTickTimer();
     this.currentBombTime = bombTime;
     const totalTime = bombTime;
-    
-    // Fonction appelée à chaque tick
     const updateTick = () => {
       if (this.currentBombTime <= 0) {
         this.stopTickTimer();
         return;
       }
-      
-      // Progression (de 1 à 0)
       const timeProgress = this.currentBombTime / totalTime;
-      
-      // Ajuster le volume
-      const newVolume = 0.5 + (1 - timeProgress) * 0.5; // va de 0.5 à 1
+      const newVolume = 0.5 + (1 - timeProgress) * 0.5;
       this.tickSound.setVolume(newVolume);
       this.tickSound.play();
       
-      // Calculer le délai pour le prochain tick
       let nextTickDelay;
-      
-      if (timeProgress < 0.15) {      // Derniers 15%
-        nextTickDelay = 200;         // 5 ticks/sec
-      } else if (timeProgress < 0.3) {// 30–15%
-        nextTickDelay = 300;         // ~3.33 ticks/sec
-      } else if (timeProgress < 0.5) {// 50–30%
-        nextTickDelay = 500;         // 2 ticks/sec
-      } else if (timeProgress < 0.7) {// 70–50%
-        nextTickDelay = 750;         // ~1.33 ticks/sec
-      } else {                       // 100–70%
-        nextTickDelay = 1000;        // 1 tick/sec
+      if (timeProgress < 0.15) {
+        nextTickDelay = 200;
+      } else if (timeProgress < 0.3) {
+        nextTickDelay = 300;
+      } else if (timeProgress < 0.5) {
+        nextTickDelay = 500;
+      } else if (timeProgress < 0.7) {
+        nextTickDelay = 750;
+      } else {
+        nextTickDelay = 1000;
       }
       
       this.currentBombTime--;
-      
       if (this.currentBombTime > 0) {
         this.tickTimer = this.time.delayedCall(nextTickDelay, updateTick);
       }
     };
-    
-    // Premier tick immédiat
     updateTick();
   }
 
@@ -255,7 +296,6 @@ export default class GameScene extends Phaser.Scene {
       this.tickTimer.remove();
       this.tickTimer = null;
     }
-    // Stopper le son si en cours
     if (this.tickSound) {
       this.tickSound.stop();
     }
@@ -265,7 +305,7 @@ export default class GameScene extends Phaser.Scene {
     this.socket.on("playerListUpdate", (data) => {
       this.updatePlayerList(data.players);
       
-      // Activer/désactiver le bouton START selon le nombre de joueurs
+      // Activation/désactivation du bouton START pour l'hôte
       if (this.isHost && this.startBtn) {
         if (data.players.length >= 2) {
           this.startBtn.clearTint();
@@ -278,35 +318,66 @@ export default class GameScene extends Phaser.Scene {
       
       console.log("Liste des joueurs mise à jour:", data.players);
       
-      // Établir les connexions P2P avec les nouveaux joueurs
+      // Pour chaque joueur distant, établir une connexion si elle n'existe pas déjà
       data.players.forEach(player => {
-        if (player.id !== this.socket.id && !this.peerConnections.has(player.id) && player.peerId) {
-          console.log("Tentative de connexion P2P avec:", player.name, "PeerID:", player.peerId);
-          
+        // On ne crée la connexion que si :
+        // • Ce n'est pas nous-même
+        // • Aucune connexion n'existe déjà
+        // • Le joueur a un peerId
+        if (
+          player.id !== this.socket.id &&
+          !this.peerConnections.has(player.id) &&
+          player.peerId
+        ) {
+          console.log("Tentative de connexion avec:", player.name, player.peerId);
           try {
             const conn = this.peer.connect(player.peerId);
-            if (conn) {
-              conn.on('open', () => {
-                console.log('Connexion P2P établie avec', player.name);
-                this.peerConnections.set(player.id, conn);
-                
-                // Test d'envoi de message
-                conn.send({
-                  type: 'test',
-                  message: `Bonjour de ${this.playerName}!`
-                });
-              });
-              
-              conn.on('data', (data) => {
-                console.log('Données P2P reçues de', player.name, ':', data);
-              });
-
-              conn.on('error', (err) => {
-                console.error('Erreur de connexion P2P avec', player.name, ':', err);
-              });
-            }
+            conn.on('data', (data) => {
+              let parsedData = null;
+              if (data instanceof ArrayBuffer) {
+                const decoder = new TextDecoder();
+                const text = decoder.decode(data);
+                try {
+                  parsedData = JSON.parse(text);
+                } catch (e) {
+                  console.error('Erreur de parsing (ArrayBuffer) :', e);
+                  return;
+                }
+              } else if (typeof data === 'string') {
+                try {
+                  parsedData = JSON.parse(data);
+                } catch (err) {
+                  console.error('Erreur de parsing (string) :', err);
+                  return;
+                }
+              } else if (typeof data === 'object') {
+                parsedData = data;
+              }
+  
+              console.log('Message reçu de', player.name, ':', parsedData);
+              if (parsedData && parsedData.type === 'chat') {
+                this.addChatMessage(parsedData.sender, parsedData.message, parsedData.time);
+              }
+            });
+  
+            conn.on('open', () => {
+              console.log('Connexion établie avec:', player.name);
+              this.peerConnections.set(player.id, conn);
+              // Envoyer un message de test une fois la connexion ouverte
+              const messageData = {
+                type: 'chat',
+                sender: this.playerName,
+                message: '👋 Connecté!',
+                time: new Date().toLocaleTimeString()
+              };
+              conn.send(JSON.stringify(messageData));
+            });
+  
+            conn.on('error', (err) => {
+              console.error('Erreur de connexion avec', player.name, ':', err);
+            });
           } catch (err) {
-            console.error('Erreur lors de la création de la connexion P2P:', err);
+            console.error('Erreur lors de la création de la connexion:', err);
           }
         }
       });
@@ -319,7 +390,6 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this.socket.on("wordAccepted", (info) => {
-      // Animer l'input en vert si c'est notre mot
       if (info.playerId === this.socket.id) {
         const input = this.wordInputContainer.node.querySelector('#wordInput');
         this.flashText(input, '#00FF00');
@@ -344,7 +414,6 @@ export default class GameScene extends Phaser.Scene {
       this.explosionSound.play();
       this.stopTickTimer();
 
-      // Jouer l'explosion sur le joueur concerné
       const playerObj = this.playerTextObjects.find(t => t.playerId === data.playerId);
       if (playerObj) {
         this.explosionEmitter.setPosition(playerObj.x, playerObj.y);
@@ -356,7 +425,6 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this.socket.on("playerEliminated", (data) => {
-      // Petit effet rouge si c'est nous
       if (data.playerId === this.socket.id) {
         const input = this.wordInputContainer.node.querySelector('#wordInput');
         this.flashText(input, '#FF0000');
@@ -371,7 +439,6 @@ export default class GameScene extends Phaser.Scene {
         color: '#FFC600'
       }).setOrigin(0.5);
 
-      // Confettis pour le gagnant
       if (this.playerName === winnerName) {
         this.confettiEmitter.setPosition(this.centerX, 0);
         this.confettiEmitter.start();
@@ -381,17 +448,13 @@ export default class GameScene extends Phaser.Scene {
       }
     });
 
-    // Ajouter la gestion des erreurs
     this.socket.on("gameError", (data) => {
-      // Afficher le message d'erreur
       const errorText = this.add.text(this.centerX, this.centerY - 150, data.message, {
         fontSize: '20px',
         color: '#FF0000',
         backgroundColor: '#000000',
         padding: { x: 10, y: 5 }
       }).setOrigin(0.5);
-
-      // Faire disparaître le message après 3 secondes
       this.time.delayedCall(3000, () => {
         errorText.destroy();
       });
@@ -399,7 +462,6 @@ export default class GameScene extends Phaser.Scene {
   }
 
   updatePlayerList(players) {
-    // Supprimer anciens textes
     this.playerTextObjects.forEach(obj => obj.destroy());
     this.playerTextObjects = [];
 
@@ -412,7 +474,6 @@ export default class GameScene extends Phaser.Scene {
       const angle = angleStep * i - Math.PI / 2; 
       const px = this.centerX + radius * Math.cos(angle);
       const py = this.centerY + radius * Math.sin(angle);
-
       let label = `${p.name}\nLives: ${p.lives}`;
       if (!p.isAlive) {
         label += "\n(ELIM)";
@@ -422,7 +483,6 @@ export default class GameScene extends Phaser.Scene {
         color: '#fff',
         align: 'center'
       }).setOrigin(0.5);
-
       pText.playerId = p.id;
       this.playerTextObjects.push(pText);
     }
@@ -444,20 +504,34 @@ export default class GameScene extends Phaser.Scene {
   }
 
   flashText(domElement, color) {
-    // Petit tween sur la couleur (si besoin)
     const originalColor = domElement.style.color;
-
     this.tweens.add({
       targets: domElement,
       duration: 100,
       repeat: 2,
       yoyo: true,
-      onStart: () => {
-        domElement.style.color = color;
-      },
-      onComplete: () => {
-        domElement.style.color = originalColor;
-      }
+      onStart: () => { domElement.style.color = color; },
+      onComplete: () => { domElement.style.color = originalColor; }
     });
+  }
+
+  addChatMessage(sender, message, time = new Date().toLocaleTimeString()) {
+    const chatMessages = document.querySelector('.chat-messages');
+    const messageElement = document.createElement('div');
+    messageElement.className = 'chat-message';
+    messageElement.innerHTML = `
+      <span class="time">[${time}]</span>
+      <span class="sender">${sender}:</span>
+      <span class="message">${message}</span>
+    `;
+    chatMessages.appendChild(messageElement);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  shutdown() {
+    const chatContainer = document.querySelector('.chat-container');
+    if (chatContainer) {
+      chatContainer.remove();
+    }
   }
 }
