@@ -11,10 +11,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.audio('explosionSound', 'assets/explosion.mp3')
+    this.load.audio('explosionSound', 'assets/explosion.mp3');
+    this.load.image('spark', 'assets/yellow.png');
+    this.load.image('confetti', 'assets/white.png');
   }
 
   create() {
+    this.cameras.main.centerOn(400, 300);
     this.centerX = this.cameras.main.centerX;
     this.centerY = this.cameras.main.centerY;
 
@@ -120,6 +123,33 @@ export default class GameScene extends Phaser.Scene {
 
     this.listenForSocketEvents();
     this.socket.emit("getPlayerList", this.roomId);
+
+    // Configuration des particules d'explosion
+    this.explosionEmitter = this.add.particles(0, 0, 'spark', {
+      lifespan: 800,
+      speed: { min: -400, max: 400 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.6, end: 0 },
+      quantity: 40,
+      blendMode: 'ADD',
+      gravityY: 500,
+      tint: [0xFF5733, 0xFFC300, 0xFF0000],
+      emitting: false
+    });
+
+    // Configuration des confettis
+    this.confettiEmitter = this.add.particles(0, 0, 'confetti', {
+      lifespan: 4000,
+      speed: { min: -200, max: 200 },
+      angle: { min: 250, max: 290 },
+      scale: { start: 0.3, end: 0.1 },
+      quantity: 3,
+      frequency: 30,
+      gravityY: 200,
+      tint: [0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF],
+      emitting: false,
+      rotate: { min: -180, max: 180 }
+    });
   }
 
   listenForSocketEvents() {
@@ -152,7 +182,17 @@ export default class GameScene extends Phaser.Scene {
 
     this.socket.on("bombExploded", (data) => {
       this.cameras.main.shake(200, 0.03);
-      this.explosionSound.play()
+      this.explosionSound.play();
+      if (data.playerId === this.socket.id) {
+        const playerObj = this.playerTextObjects.find(t => t.playerId === this.socket.id);
+        if (playerObj) {
+          this.explosionEmitter.setPosition(playerObj.x, playerObj.y);
+          this.explosionEmitter.start();
+          this.time.delayedCall(200, () => {
+            this.explosionEmitter.stop();
+          });
+        }
+      }
     });
 
     this.socket.on("playerEliminated", (data) => {
@@ -163,10 +203,19 @@ export default class GameScene extends Phaser.Scene {
 
     this.socket.on("gameOver", (res) => {
       const { winnerName } = res;
-      this.add.text(this.centerX, this.centerY + 200, `Game Over! Winner: ${winnerName}`, {
+      const gameOverText = this.add.text(this.centerX, this.centerY + 200, 
+        `Game Over! Winner: ${winnerName}`, {
         fontSize: '28px',
         color: '#FFC600'
       }).setOrigin(0.5);
+
+      if (this.playerName === winnerName) {
+        this.confettiEmitter.setPosition(this.centerX, 0);
+        this.confettiEmitter.start();
+        this.time.delayedCall(3000, () => {
+          this.confettiEmitter.stop();
+        });
+      }
     });
   }
 
