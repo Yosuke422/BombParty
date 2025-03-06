@@ -418,19 +418,168 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this.socket.on("gameOver", (res) => {
-      const { winnerName } = res;
-      const gameOverText = this.add.text(this.centerX, this.centerY + 200, 
-        `Game Over! Winner: ${winnerName}`, {
+      console.log("Event gameOver reçu:", res);
+      const { winnerName, scoreboard } = res;
+      
+      // Affiche directement le gagnant sur l'écran (en plus du tableau des scores)
+      this.gameOverText = this.add.text(this.centerX, this.centerY - 150, 
+        `PARTIE TERMINÉE! Gagnant: ${winnerName}`, {
         fontSize: '28px',
-        color: '#FFC600'
+        color: '#FFC600',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        padding: { x: 20, y: 10 }
       }).setOrigin(0.5);
-
+      
+      // Créer un conteneur pour les informations de fin de partie
+      const gameOverContainer = document.createElement('div');
+      gameOverContainer.className = 'game-over-container';
+      gameOverContainer.style.position = 'absolute';
+      gameOverContainer.style.top = '50%';
+      gameOverContainer.style.left = '50%';
+      gameOverContainer.style.transform = 'translate(-50%, -50%)';
+      gameOverContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+      gameOverContainer.style.padding = '20px';
+      gameOverContainer.style.borderRadius = '8px';
+      gameOverContainer.style.color = 'white';
+      gameOverContainer.style.textAlign = 'center';
+      gameOverContainer.style.minWidth = '300px';
+      gameOverContainer.style.zIndex = '1000';
+      
+      // Titre
+      const title = document.createElement('h2');
+      title.textContent = `Game Over! Winner: ${winnerName}`;
+      title.style.color = '#FFC600';
+      title.style.marginBottom = '20px';
+      gameOverContainer.appendChild(title);
+      
+      // Tableau des scores
+      const scoreTable = document.createElement('table');
+      scoreTable.style.width = '100%';
+      scoreTable.style.borderCollapse = 'collapse';
+      scoreTable.style.marginBottom = '20px';
+      
+      // En-tête du tableau
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      ['Joueur', 'Victoires'].forEach(text => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        th.style.padding = '8px';
+        th.style.borderBottom = '1px solid #666';
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      scoreTable.appendChild(thead);
+      
+      // Corps du tableau
+      const tbody = document.createElement('tbody');
+      scoreboard.sort((a, b) => b.wins - a.wins).forEach(player => {
+        const row = document.createElement('tr');
+        
+        const nameCell = document.createElement('td');
+        nameCell.textContent = player.name + (player.isHost ? ' (Hôte)' : '');
+        nameCell.style.padding = '8px';
+        nameCell.style.borderBottom = '1px solid #444';
+        row.appendChild(nameCell);
+        
+        const winsCell = document.createElement('td');
+        winsCell.textContent = player.wins;
+        winsCell.style.padding = '8px';
+        winsCell.style.borderBottom = '1px solid #444';
+        winsCell.style.textAlign = 'center';
+        row.appendChild(winsCell);
+        
+        tbody.appendChild(row);
+      });
+      scoreTable.appendChild(tbody);
+      gameOverContainer.appendChild(scoreTable);
+      
+      // Options de redémarrage (uniquement pour l'hôte)
+      const isHost = scoreboard.find(p => p.name === this.playerName)?.isHost;
+      if (isHost) {
+        // Sélecteur de nombre de vies
+        const livesGroup = document.createElement('div');
+        livesGroup.style.marginBottom = '15px';
+        
+        const livesLabel = document.createElement('label');
+        livesLabel.textContent = 'Nombre de vies: ';
+        livesLabel.style.marginRight = '10px';
+        livesGroup.appendChild(livesLabel);
+        
+        const livesSelect = document.createElement('select');
+        livesSelect.id = 'restartLives';
+        for (let i = 1; i <= 5; i++) {
+          const option = document.createElement('option');
+          option.value = i;
+          option.textContent = i;
+          livesSelect.appendChild(option);
+        }
+        livesSelect.value = 3; // Valeur par défaut
+        livesGroup.appendChild(livesSelect);
+        
+        gameOverContainer.appendChild(livesGroup);
+        
+        // Bouton de redémarrage
+        const restartBtn = document.createElement('button');
+        restartBtn.textContent = 'Redémarrer la partie';
+        restartBtn.style.padding = '10px 15px';
+        restartBtn.style.backgroundColor = '#4b53ff';
+        restartBtn.style.color = 'white';
+        restartBtn.style.border = 'none';
+        restartBtn.style.borderRadius = '4px';
+        restartBtn.style.cursor = 'pointer';
+        restartBtn.style.fontSize = '16px';
+        restartBtn.onclick = () => {
+          const lives = document.getElementById('restartLives').value;
+          this.socket.emit('restartGame', { roomId: this.roomId, lives });
+          gameOverContainer.remove();
+        };
+        gameOverContainer.appendChild(restartBtn);
+      } else {
+        // Message pour les non-hôtes
+        const waitText = document.createElement('p');
+        waitText.textContent = "En attente que l'hôte redémarre la partie...";
+        waitText.style.fontStyle = 'italic';
+        waitText.style.marginTop = '15px';
+        gameOverContainer.appendChild(waitText);
+      }
+      
+      document.body.appendChild(gameOverContainer);
+      
       if (this.playerName === winnerName) {
         this.confettiEmitter.setPosition(this.centerX, 0);
         this.confettiEmitter.start();
         this.time.delayedCall(3000, () => {
           this.confettiEmitter.stop();
         });
+      }
+    });
+
+    this.socket.on("gameRestarted", (data) => {
+      // Supprimer le conteneur de fin de partie s'il existe encore
+      const existingContainer = document.querySelector('.game-over-container');
+      if (existingContainer) {
+        existingContainer.remove();
+      }
+      
+      // Supprimer le texte de fin de partie
+      if (this.gameOverText) {
+        this.gameOverText.destroy();
+        this.gameOverText = null;
+      }
+      
+      // Mettre à jour l'interface
+      this.currentTurnPlayerId = data.currentPlayerId;
+      this.promptText.setText(`Prompt: ${data.prompt}`);
+      
+      // Mettre à jour les joueurs
+      this.updatePlayerList(data.players);
+      this.updateArrowPosition();
+      
+      const input = document.querySelector('#wordInput');
+      if (input && this.currentTurnPlayerId === this.socket.id) {
+        input.removeAttribute('disabled');
+        input.focus();
       }
     });
 

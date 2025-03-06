@@ -103,7 +103,8 @@ io.on("connection", (socket) => {
           id: socket.id,
           name: hostName || "Host",
           lives: numLives,
-          isAlive: true
+          isAlive: true,
+          wins: 0
         }
       ],
       status: "lobby",
@@ -140,7 +141,8 @@ io.on("connection", (socket) => {
       name,
       lives: room.settings.lives,
       isAlive: true,
-      peerId: peerId
+      peerId: peerId,
+      wins: 0
     });
     socket.join(roomId);
     console.log(`${name} joined room ${roomId}`);
@@ -200,6 +202,50 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("restartGame", ({ roomId, lives }) => {
+    roomId = roomId.toUpperCase();
+    const room = rooms[roomId];
+    if (!room) return;
+    
+    // Vérifier si la personne qui demande le restart est l'hôte
+    const player = room.players.find(p => p.id === socket.id);
+    const isHost = player && player.name === room.settings.hostName;
+    
+    if (!isHost) {
+      socket.emit("gameError", { message: "Seul l'hôte peut redémarrer la partie" });
+      return;
+    }
+    
+    // Mettre à jour le nombre de vies si spécifié
+    if (lives) {
+      let numLives = parseInt(lives) || 3;
+      if (numLives < 1) numLives = 1;
+      if (numLives > 5) numLives = 5;
+      room.settings.lives = numLives;
+    }
+    
+    // Réinitialiser les vies des joueurs
+    room.players.forEach(p => {
+      p.lives = room.settings.lives;
+      p.isAlive = true;
+    });
+    
+    room.status = "playing";
+    room.currentPrompt = generatePrompt();
+    room.currentPlayerIndex = 0; 
+    room.usedWords.clear();
+    
+    // Informer les clients
+    io.to(roomId).emit("gameRestarted", {
+      livesPerPlayer: room.settings.lives,
+      prompt: room.currentPrompt,
+      currentPlayerId: room.players[0].id,
+      players: room.players
+    });
+    
+    startTurn(roomId);
+  });
+
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
     for (const [rid, room] of Object.entries(rooms)) {
@@ -245,18 +291,31 @@ io.on("connection", (socket) => {
     room.bombTimer = setTimeout(() => {
       currentPlayer.lives -= 1;
       
+      io.to(roomId).emit("bombExploded", {
+        playerId: currentPlayer.id,
+        remainingLives: currentPlayer.lives
+      });
+      
       if (currentPlayer.lives <= 0) {
         currentPlayer.isAlive = false;
-        io.to(roomId).emit("playerEliminated", { playerId: currentPlayer.id });
+        console.log(`[playerEliminated] Player ${currentPlayer.name} eliminated, remaining lives: ${currentPlayer.lives}, isAlive: ${currentPlayer.isAlive}`);
+        
+        // On vérifie d'abord si le jeu est terminé
+        const isGameOver = checkForGameOver(roomId);
+        
+        setTimeout(() => {
+          io.to(roomId).emit("playerEliminated", { playerId: currentPlayer.id });
+          io.to(roomId).emit("playerListUpdate", { players: room.players });
+          
+          // Si le jeu n'est pas terminé, on passe au tour suivant
+          if (!isGameOver) {
+            moveToNextTurn(roomId);
+          }
+        }, 500);
       } else {
-        io.to(roomId).emit("bombExploded", {
-          playerId: currentPlayer.id,
-          remainingLives: currentPlayer.lives
-        });
+        io.to(roomId).emit("playerListUpdate", { players: room.players });
+        moveToNextTurn(roomId);
       }
-      
-      io.to(roomId).emit("playerListUpdate", { players: room.players });
-      moveToNextTurn(roomId);
     }, bombTime * 1000);
   }
 
@@ -265,7 +324,11 @@ io.on("connection", (socket) => {
     if (!room) return;
     clearTimeout(room.bombTimer);
   
-    if (checkForGameOver(roomId)) return;
+    console.log(`[moveToNextTurn] Checking if game is over for room ${roomId}`);
+    if (checkForGameOver(roomId)) {
+      console.log(`[moveToNextTurn] Game is over, not moving to next turn`);
+      return;
+    }
   
     let nextIndex = (room.currentPlayerIndex + 1) % room.players.length;
     let safeCount = 0;
@@ -290,11 +353,34 @@ io.on("connection", (socket) => {
     if (room.status !== "playing") return true;
   
     const alivePlayers = room.players.filter(p => p.isAlive);
+    console.log(`[checkForGameOver] Room: ${roomId}, Alive players: ${alivePlayers.length}`);
+    console.log(`[checkForGameOver] Players status:`, room.players.map(p => `${p.name}: ${p.isAlive ? 'alive' : 'eliminated'}`));
+    
     if (alivePlayers.length <= 1) {
       room.status = "lobby";
       clearTimeout(room.bombTimer);
-      const winnerName = alivePlayers[0]?.name || "No Winner";
-      io.to(roomId).emit("gameOver", { winnerName });
+      let winnerName = "No Winner";
+      
+      if (alivePlayers.length === 1) {
+        const winner = alivePlayers[0];
+        winnerName = winner.name;
+        winner.wins += 1; // Incrémenter le nombre de victoires
+        console.log(`[checkForGameOver] Winner found: ${winnerName}`);
+      } else {
+        console.log(`[checkForGameOver] No winner found`);
+      }
+      
+      // Envoyer les informations de fin de partie avec le tableau des scores
+      io.to(roomId).emit("gameOver", { 
+        winnerName,
+        scoreboard: room.players.map(p => ({
+          name: p.name,
+          wins: p.wins,
+          isHost: p.name === room.settings.hostName
+        }))
+      });
+      console.log(`[checkForGameOver] Game over event sent`);
+      
       return true;
     }
     return false;
