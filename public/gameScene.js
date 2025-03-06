@@ -9,7 +9,6 @@ export default class GameScene extends Phaser.Scene {
     this.playerName = data.playerName;
     this.isHost = data.isHost;
     
-    // Récupération de secours du roomId depuis localStorage si nécessaire
     if (!this.roomId) {
       console.warn("roomId non défini dans les données de la scène. Tentative de récupération depuis localStorage...");
       const savedRoomId = localStorage.getItem('lastRoomId');
@@ -26,13 +25,11 @@ export default class GameScene extends Phaser.Scene {
     this.peerConnections = new Map();
     this.tickTimer = null;
     this.currentBombTime = 0;
-    this.messagesSeen = new Set(); // Pour éviter les doublons
+    this.messagesSeen = new Set(); 
 
-    // Gestion des connexions entrantes (pour le host ou tous les pairs)
     this.peer.on('connection', (conn) => {
       console.log('Nouvelle connexion P2P entrante de:', conn.peer);
 
-      // Configurer le canal de données
       conn.peerConnection.addEventListener('datachannel', (event) => {
         const channel = event.channel;
         channel.binaryType = 'arraybuffer';
@@ -40,7 +37,6 @@ export default class GameScene extends Phaser.Scene {
 
       conn.on('data', (data) => {
         let messageData = null;
-        // Si c'est un ArrayBuffer, on le décode et parse en JSON
         if (data instanceof ArrayBuffer) {
           const decoder = new TextDecoder();
           const text = decoder.decode(data);
@@ -63,15 +59,12 @@ export default class GameScene extends Phaser.Scene {
   
         console.log('Message reçu sur connexion entrante:', messageData);
         if (messageData && messageData.type === 'chat') {
-          // Créer un identifiant unique pour le message
           const msgId = `${messageData.sender}-${messageData.time}-${messageData.message}`;
           
-          // Vérifier si on a déjà vu ce message
           if (!this.messagesSeen.has(msgId)) {
             this.messagesSeen.add(msgId);
             this.addChatMessage(messageData.sender, messageData.message, messageData.time);
             
-            // Relayer le message aux autres joueurs (pour que tout le monde le voie)
             this.relayMessageToOthers(messageData, conn.peer);
           }
         }
@@ -79,7 +72,6 @@ export default class GameScene extends Phaser.Scene {
 
       conn.on('open', () => {
         console.log('Connexion entrante ouverte avec peer ID:', conn.peer);
-        // On stocke la connexion avec la clé correspondant au peerId distant
         this.peerConnections.set(conn.peer, conn);
       });
     });
@@ -185,7 +177,6 @@ export default class GameScene extends Phaser.Scene {
     this.playerTextObjects = [];
     this.listenForSocketEvents();
     
-    // S'assurer que roomId est défini avant d'appeler getPlayerList
     if (this.roomId) {
       console.log("Demande de la liste des joueurs pour la salle:", this.roomId);
       this.socket.emit("getPlayerList", this.roomId);
@@ -216,15 +207,9 @@ export default class GameScene extends Phaser.Scene {
       tint: [0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF],
       emitting: false,
       rotate: { min: -180, max: 180 }
-    });
-    this.add.text(10, 550, "[Test P2P]", {
-      fontSize: '16px',
-      backgroundColor: '#4b53ff',
-      padding: { x: 10, y: 5 },
     })
     .setInteractive()
     .on('pointerdown', () => {
-      // Envoi d'un message de test à tous les pairs
       this.peerConnections.forEach((conn) => {
         const messageData = {
           type: 'chat',
@@ -264,17 +249,13 @@ export default class GameScene extends Phaser.Scene {
           time: new Date().toLocaleTimeString()
         };
         
-        // Créer un identifiant unique pour le message
         const msgId = `${messageData.sender}-${messageData.time}-${messageData.message}`;
         this.messagesSeen.add(msgId);
         
-        // Afficher le message localement
         this.addChatMessage(messageData.sender, messageData.message, messageData.time);
         
-        // Compter les connexions actives
         let activeConnections = 0;
         
-        // Envoi aux autres joueurs
         this.peerConnections.forEach((conn, peerId) => {
           if (conn.open) {
             activeConnections++;
@@ -291,7 +272,6 @@ export default class GameScene extends Phaser.Scene {
         
         console.log(`Message envoyé à ${activeConnections} connexions actives sur ${this.peerConnections.size} connexions totales`);
         
-        // Si aucune connexion active n'est trouvée, tenter de rafraîchir les connexions
         if (activeConnections === 0 && this.peerConnections.size > 0) {
           console.warn("Aucune connexion P2P active trouvée. Tentative de rafraîchissement des connexions...");
           this.refreshPeerConnections();
@@ -300,10 +280,8 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  // Nouvelle fonction pour rafraîchir les connexions
   refreshPeerConnections() {
     console.log("Rafraîchissement des connexions P2P...");
-    // Demander à nouveau la liste des joueurs pour tenter de rétablir les connexions
     if (this.roomId) {
       console.log("Demande de la liste des joueurs pour rafraîchir les connexions:", this.roomId);
       this.socket.emit("getPlayerList", this.roomId);
@@ -361,7 +339,6 @@ export default class GameScene extends Phaser.Scene {
     this.socket.on("playerListUpdate", (data) => {
       this.updatePlayerList(data.players);
       
-      // Activation/désactivation du bouton START pour l'hôte
       if (this.isHost && this.startBtn) {
         if (data.players.length >= 2) {
           this.startBtn.clearTint();
@@ -374,12 +351,11 @@ export default class GameScene extends Phaser.Scene {
       
       console.log("Liste des joueurs mise à jour:", data.players);
       
-      // Établir des connexions P2P avec tous les joueurs qui ont un peerId
       data.players.forEach(player => {
         if (
-          player.id !== this.socket.id && // On ne se connecte pas à soi-même
-          player.peerId && // Le joueur doit avoir un peerId
-          !this.peerConnections.has(player.peerId) // On n'établit pas de connexion si elle existe déjà
+          player.id !== this.socket.id && 
+          player.peerId &&
+          !this.peerConnections.has(player.peerId)
         ) {
           console.log("Tentative de connexion avec:", player.name, player.peerId);
           try {
@@ -409,15 +385,12 @@ export default class GameScene extends Phaser.Scene {
 
               console.log('Message reçu de', player.name, ':', parsedData);
               if (parsedData && parsedData.type === 'chat') {
-                // Créer un identifiant unique pour le message
                 const msgId = `${parsedData.sender}-${parsedData.time}-${parsedData.message}`;
                 
-                // Vérifier si on a déjà vu ce message
                 if (!this.messagesSeen.has(msgId)) {
                   this.messagesSeen.add(msgId);
                   this.addChatMessage(parsedData.sender, parsedData.message, parsedData.time);
                   
-                  // Relayer le message aux autres joueurs
                   this.relayMessageToOthers(parsedData, player.peerId);
                 }
               }
@@ -427,7 +400,6 @@ export default class GameScene extends Phaser.Scene {
               console.log('Connexion sortante établie avec:', player.name, player.peerId);
               this.peerConnections.set(player.peerId, conn);
               
-              // Envoyer un message de bienvenue
               const messageData = {
                 type: 'chat',
                 sender: this.playerName,
@@ -435,7 +407,6 @@ export default class GameScene extends Phaser.Scene {
                 time: new Date().toLocaleTimeString()
               };
               
-              // Ajouter à la liste des messages vus pour éviter les duplications
               const msgId = `${messageData.sender}-${messageData.time}-${messageData.message}`;
               this.messagesSeen.add(msgId);
               
@@ -505,7 +476,6 @@ export default class GameScene extends Phaser.Scene {
       console.log("Event gameOver reçu:", res);
       const { winnerName, scoreboard } = res;
       
-      // Affiche directement le gagnant sur l'écran (en plus du tableau des scores)
       this.gameOverText = this.add.text(this.centerX, this.centerY - 150, 
         `PARTIE TERMINÉE! Gagnant: ${winnerName}`, {
         fontSize: '28px',
@@ -514,7 +484,6 @@ export default class GameScene extends Phaser.Scene {
         padding: { x: 20, y: 10 }
       }).setOrigin(0.5);
       
-      // Créer un conteneur pour les informations de fin de partie
       const gameOverContainer = document.createElement('div');
       gameOverContainer.className = 'game-over-container';
       gameOverContainer.style.position = 'absolute';
@@ -529,20 +498,17 @@ export default class GameScene extends Phaser.Scene {
       gameOverContainer.style.minWidth = '300px';
       gameOverContainer.style.zIndex = '1000';
       
-      // Titre
       const title = document.createElement('h2');
       title.textContent = `Game Over! Winner: ${winnerName}`;
       title.style.color = '#FFC600';
       title.style.marginBottom = '20px';
       gameOverContainer.appendChild(title);
       
-      // Tableau des scores
       const scoreTable = document.createElement('table');
       scoreTable.style.width = '100%';
       scoreTable.style.borderCollapse = 'collapse';
       scoreTable.style.marginBottom = '20px';
       
-      // En-tête du tableau
       const thead = document.createElement('thead');
       const headerRow = document.createElement('tr');
       ['Joueur', 'Victoires'].forEach(text => {
@@ -555,7 +521,6 @@ export default class GameScene extends Phaser.Scene {
       thead.appendChild(headerRow);
       scoreTable.appendChild(thead);
       
-      // Corps du tableau
       const tbody = document.createElement('tbody');
       scoreboard.sort((a, b) => b.wins - a.wins).forEach(player => {
         const row = document.createElement('tr');
@@ -578,7 +543,6 @@ export default class GameScene extends Phaser.Scene {
       scoreTable.appendChild(tbody);
       gameOverContainer.appendChild(scoreTable);
       
-      // Options de redémarrage (uniquement pour l'hôte)
       console.log("Données du scoreboard:", scoreboard);
       const currentPlayer = scoreboard.find(p => p.name === this.playerName);
       console.log("Joueur actuel:", currentPlayer);
@@ -586,7 +550,6 @@ export default class GameScene extends Phaser.Scene {
       console.log("Est-ce que le joueur est l'hôte:", isHost);
 
       if (isHost) {
-        // Sélecteur de nombre de vies
         const livesGroup = document.createElement('div');
         livesGroup.style.marginBottom = '15px';
         
@@ -603,12 +566,11 @@ export default class GameScene extends Phaser.Scene {
           option.textContent = i;
           livesSelect.appendChild(option);
         }
-        livesSelect.value = 3; // Valeur par défaut
+        livesSelect.value = 3; 
         livesGroup.appendChild(livesSelect);
         
         gameOverContainer.appendChild(livesGroup);
         
-        // Bouton de redémarrage
         const restartBtn = document.createElement('button');
         restartBtn.textContent = 'Redémarrer la partie';
         restartBtn.style.padding = '10px 15px';
@@ -627,7 +589,6 @@ export default class GameScene extends Phaser.Scene {
         };
         gameOverContainer.appendChild(restartBtn);
       } else {
-        // Message pour les non-hôtes
         const waitText = document.createElement('p');
         waitText.textContent = "En attente que l'hôte redémarre la partie...";
         waitText.style.fontStyle = 'italic';
@@ -649,23 +610,19 @@ export default class GameScene extends Phaser.Scene {
     this.socket.on("gameRestarted", (data) => {
       console.log("Événement gameRestarted reçu:", data);
       
-      // Supprimer le conteneur de fin de partie s'il existe encore
       const existingContainer = document.querySelector('.game-over-container');
       if (existingContainer) {
         existingContainer.remove();
       }
       
-      // Supprimer le texte de fin de partie
       if (this.gameOverText) {
         this.gameOverText.destroy();
         this.gameOverText = null;
       }
       
-      // Mettre à jour l'interface
       this.currentTurnPlayerId = data.currentPlayerId;
       this.promptText.setText(`Prompt: ${data.prompt}`);
       
-      // Mettre à jour les joueurs
       this.updatePlayerList(data.players);
       this.updateArrowPosition();
       
@@ -762,10 +719,8 @@ export default class GameScene extends Phaser.Scene {
     const messageElement = document.createElement('div');
     messageElement.className = 'chat-message';
     
-    // Déterminer si c'est un message de l'utilisateur actuel
     const isOwnMessage = sender === this.playerName;
     
-    // Ajouter une classe supplémentaire si c'est un message de l'utilisateur actuel
     if (isOwnMessage) {
       messageElement.classList.add('own-message');
     }
@@ -787,7 +742,6 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // Méthode pour relayer un message aux autres joueurs (sauf à l'expéditeur original)
   relayMessageToOthers(messageData, senderPeerId) {
     this.peerConnections.forEach((conn, peerId) => {
       if (peerId !== senderPeerId && conn.open) {

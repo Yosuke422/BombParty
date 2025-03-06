@@ -15,12 +15,10 @@ const game = new Phaser.Game(config);
 const socket = io();
 game.socket = socket;
 
-// Initialisation de PeerJS
 const isProd = window.location.hostname !== 'localhost';
 let peerConfig;
 
 if (isProd) {
-  // Configuration pour l'environnement de production (Render)
   peerConfig = {
     host: window.location.hostname,
     path: '/peerjs/myapp',
@@ -29,7 +27,6 @@ if (isProd) {
     debug: 1
   };
 } else {
-  // Configuration pour l'environnement local
   peerConfig = {
     host: 'localhost',
     port: 9000,
@@ -49,10 +46,8 @@ peer.on('error', (error) => {
   console.error('Erreur PeerJS:', error);
 });
 
-// Ajouter un gestionnaire de déconnexion
 peer.on('disconnected', () => {
   console.log('Déconnecté du serveur PeerJS');
-  // Tentative de reconnexion
   peer.reconnect();
 });
 

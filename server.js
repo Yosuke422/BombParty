@@ -1,4 +1,3 @@
-// Charger les variables d'environnement
 require('dotenv').config();
 
 const express = require("express");
@@ -9,7 +8,6 @@ const { v4: uuidv4 } = require("uuid");
 const { PeerServer } = require('peer');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
-// Configuration des ports
 const PORT = process.env.PORT || 3000;
 const PEER_PORT = process.env.PEER_PORT || 9000;
 const isProd = process.env.NODE_ENV === 'production';
@@ -18,13 +16,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Configuration du serveur PeerJS
-// En local, on veut un serveur PeerJS séparé sur le port 9000
-// En production sur Render, on veut utiliser le même port que l'application
-
-// Si nous sommes en production (sur Render par exemple)
 if (isProd) {
-  // Intégrer PeerServer dans l'application Express existante
   app.use('/peerjs', require('peer').ExpressPeerServer(server, {
     path: '/myapp',
     proxied: true,
@@ -32,14 +24,12 @@ if (isProd) {
   }));
   console.log("PeerServer intégré au serveur Express en mode production");
 } else {
-  // En local, exécuter PeerServer sur un port séparé
   const peerServer = PeerServer({
     port: PEER_PORT,
     path: '/myapp',
     proxied: false
   });
   
-  // Logging pour debug
   peerServer.on('connection', (client) => {
     console.log('Nouvelle connexion PeerJS en local:', client.id);
   });
@@ -117,7 +107,6 @@ server.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
 
-// Fonction de sécurité pour traiter les roomIds
 function safeRoomId(roomId, eventName) {
   if (!roomId) {
     console.log(`${eventName}: appelé avec un roomId null ou undefined`);
@@ -288,7 +277,6 @@ io.on("connection", (socket) => {
       return;
     }
     
-    // Vérifier si la personne qui demande le restart est l'hôte
     const player = room.players.find(p => p.id === socket.id);
     console.log("Joueur qui demande le redémarrage:", player?.name);
     console.log("Hôte de la salle:", room.settings.hostName);
@@ -304,7 +292,6 @@ io.on("connection", (socket) => {
     
     console.log("Redémarrage de la partie accepté");
     
-    // Mettre à jour le nombre de vies si spécifié
     if (lives) {
       let numLives = parseInt(lives) || 3;
       if (numLives < 1) numLives = 1;
@@ -312,7 +299,6 @@ io.on("connection", (socket) => {
       room.settings.lives = numLives;
     }
     
-    // Réinitialiser les vies des joueurs
     room.players.forEach(p => {
       p.lives = room.settings.lives;
       p.isAlive = true;
@@ -323,7 +309,6 @@ io.on("connection", (socket) => {
     room.currentPlayerIndex = 0; 
     room.usedWords.clear();
     
-    // Informer les clients
     io.to(safeId).emit("gameRestarted", {
       livesPerPlayer: room.settings.lives,
       prompt: room.currentPrompt,
@@ -341,7 +326,6 @@ io.on("connection", (socket) => {
     const room = rooms[safeId];
     if (!room) return;
     
-    // Trouver et retirer le joueur de la salle
     const playerIndex = room.players.findIndex(p => p.id === socket.id);
     if (playerIndex === -1) return;
     
@@ -349,15 +333,12 @@ io.on("connection", (socket) => {
     socket.leave(safeId);
     room.players.splice(playerIndex, 1);
     
-    // Envoyer la mise à jour de la liste des joueurs aux autres joueurs
     io.to(safeId).emit("playerListUpdate", { players: room.players });
     
-    // Si la salle est vide, la supprimer
     if (room.players.length === 0) {
       delete rooms[safeId];
       console.log(`Salle ${safeId} supprimée (plus de joueurs)`);
     } else {
-      // Si le jeu est en cours, vérifier s'il doit être arrêté
       if (room.status === "playing") {
         checkForGameOver(safeId);
       }
@@ -367,7 +348,6 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("Client déconnecté:", socket.id);
     
-    // Parcourir toutes les salles pour trouver et retirer le joueur déconnecté
     for (const [rid, room] of Object.entries(rooms)) {
       const idx = room.players.findIndex(p => p.id === socket.id);
       if (idx !== -1) {
@@ -379,7 +359,6 @@ io.on("connection", (socket) => {
           delete rooms[rid];
           console.log(`Salle ${rid} supprimée (plus de joueurs après déconnexion)`);
         } else if (room.status === "playing") {
-          // Utiliser une version sécurisée pour checkForGameOver
           const safeRid = safeRoomId(rid, "disconnect->checkForGameOver");
           if (safeRid) {
             checkForGameOver(safeRid);
@@ -424,14 +403,12 @@ io.on("connection", (socket) => {
         currentPlayer.isAlive = false;
         console.log(`[playerEliminated] Player ${currentPlayer.name} eliminated, remaining lives: ${currentPlayer.lives}, isAlive: ${currentPlayer.isAlive}`);
         
-        // On vérifie d'abord si le jeu est terminé
         const isGameOver = checkForGameOver(safeId);
         
         setTimeout(() => {
           io.to(safeId).emit("playerEliminated", { playerId: currentPlayer.id });
           io.to(safeId).emit("playerListUpdate", { players: room.players });
           
-          // Si le jeu n'est pas terminé, on passe au tour suivant
           if (!isGameOver) {
             moveToNextTurn(safeId);
           }
@@ -457,7 +434,6 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Passer au joueur suivant qui est toujours en vie
     let nextPlayerIndex = room.currentPlayerIndex;
     let counter = 0;
     
@@ -465,7 +441,6 @@ io.on("connection", (socket) => {
       nextPlayerIndex = (nextPlayerIndex + 1) % room.players.length;
       counter++;
       
-      // Éviter une boucle infinie si tous les joueurs sont éliminés
       if (counter > room.players.length) {
         console.log(`[moveToNextTurn] No alive players found after checking all players`);
         checkForGameOver(safeId);
@@ -496,7 +471,6 @@ io.on("connection", (socket) => {
     console.log(`[checkForGameOver] Room: ${safeId}, Alive players: ${alivePlayers.length}`);
     console.log(`[checkForGameOver] Players status:`, room.players.map(p => `${p.name}: ${p.isAlive ? 'alive' : 'eliminated'}`));
     
-    // Si un seul joueur est vivant, c'est le gagnant
     if (alivePlayers.length === 1 && room.players.length > 1) {
       const winner = alivePlayers[0];
       winner.wins += 1;
@@ -507,7 +481,6 @@ io.on("connection", (socket) => {
       room.status = "over";
       clearTimeout(room.bombTimer);
       
-      // Envoyer les informations de fin de partie avec le tableau des scores
       io.to(safeId).emit("gameOver", { 
         winnerName,
         scoreboard: room.players.map(p => ({
