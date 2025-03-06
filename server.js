@@ -69,7 +69,12 @@ function generatePrompt() {
     "ad", "an", "as", "at", "if", "of", "on", "or", "to", "up",
     "ly", "ed", "en", "ic", "al", "er", "nt", "ma", "pa", "si",
     "li", "go", "lo", "me", "by", "id", "am", "it", "ox", "pi",
-    "ce", "ra", "ch", "pr", "di", "fi", "nu", "vi", "ta", "mi"
+    "ce", "ra", "ch", "pr", "di", "fi", "nu", "vi", "ta", "mi",
+    "pro", "con", "pre", "tri", "for",
+    "com", "ent", "par", "ver", "mal",
+    "bon", "cha", "per", "dou", "pla",
+    "sur", "tou", "man", "des", "acc",
+    "emp", "tra", "ven", "jou", "bea"
   ];
   return prompts[Math.floor(Math.random() * prompts.length)];
 }
