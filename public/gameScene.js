@@ -4,9 +4,23 @@ export default class GameScene extends Phaser.Scene {
   }
 
   init(data) {
+    console.log("GameScene init avec données:", data);
     this.roomId = data.roomId;
     this.playerName = data.playerName;
     this.isHost = data.isHost;
+    
+    // Récupération de secours du roomId depuis localStorage si nécessaire
+    if (!this.roomId) {
+      console.warn("roomId non défini dans les données de la scène. Tentative de récupération depuis localStorage...");
+      const savedRoomId = localStorage.getItem('lastRoomId');
+      if (savedRoomId) {
+        console.log("roomId récupéré depuis localStorage:", savedRoomId);
+        this.roomId = savedRoomId;
+      } else {
+        console.error("Impossible de récupérer le roomId, le chat ne fonctionnera pas correctement");
+      }
+    }
+    
     this.socket = this.game.socket
     this.peer = this.game.peer;
     this.peerConnections = new Map();
@@ -170,7 +184,14 @@ export default class GameScene extends Phaser.Scene {
 
     this.playerTextObjects = [];
     this.listenForSocketEvents();
-    this.socket.emit("getPlayerList", this.roomId);
+    
+    // S'assurer que roomId est défini avant d'appeler getPlayerList
+    if (this.roomId) {
+      console.log("Demande de la liste des joueurs pour la salle:", this.roomId);
+      this.socket.emit("getPlayerList", this.roomId);
+    } else {
+      console.error("Erreur: roomId n'est pas défini dans GameScene");
+    }
 
     this.explosionEmitter = this.add.particles(0, 0, 'spark', {
       lifespan: 800,
@@ -250,19 +271,45 @@ export default class GameScene extends Phaser.Scene {
         // Afficher le message localement
         this.addChatMessage(messageData.sender, messageData.message, messageData.time);
         
+        // Compter les connexions actives
+        let activeConnections = 0;
+        
         // Envoi aux autres joueurs
-        this.peerConnections.forEach((conn) => {
+        this.peerConnections.forEach((conn, peerId) => {
           if (conn.open) {
-            console.log('Envoi du message à:', conn.peer);
+            activeConnections++;
+            console.log('Envoi du message à:', peerId);
             try {
               conn.send(JSON.stringify(messageData));
             } catch (err) {
-              console.error('Erreur lors de l\'envoi du message:', err);
+              console.error('Erreur lors de l\'envoi du message:', err, 'à', peerId);
             }
+          } else {
+            console.warn('Connexion fermée avec:', peerId);
           }
         });
+        
+        console.log(`Message envoyé à ${activeConnections} connexions actives sur ${this.peerConnections.size} connexions totales`);
+        
+        // Si aucune connexion active n'est trouvée, tenter de rafraîchir les connexions
+        if (activeConnections === 0 && this.peerConnections.size > 0) {
+          console.warn("Aucune connexion P2P active trouvée. Tentative de rafraîchissement des connexions...");
+          this.refreshPeerConnections();
+        }
       }
     });
+  }
+
+  // Nouvelle fonction pour rafraîchir les connexions
+  refreshPeerConnections() {
+    console.log("Rafraîchissement des connexions P2P...");
+    // Demander à nouveau la liste des joueurs pour tenter de rétablir les connexions
+    if (this.roomId) {
+      console.log("Demande de la liste des joueurs pour rafraîchir les connexions:", this.roomId);
+      this.socket.emit("getPlayerList", this.roomId);
+    } else {
+      console.error("Impossible de rafraîchir les connexions: roomId n'est pas défini");
+    }
   }
 
   startTickTimer(bombTime) {
@@ -532,7 +579,12 @@ export default class GameScene extends Phaser.Scene {
       gameOverContainer.appendChild(scoreTable);
       
       // Options de redémarrage (uniquement pour l'hôte)
-      const isHost = scoreboard.find(p => p.name === this.playerName)?.isHost;
+      console.log("Données du scoreboard:", scoreboard);
+      const currentPlayer = scoreboard.find(p => p.name === this.playerName);
+      console.log("Joueur actuel:", currentPlayer);
+      const isHost = currentPlayer?.isHost;
+      console.log("Est-ce que le joueur est l'hôte:", isHost);
+
       if (isHost) {
         // Sélecteur de nombre de vies
         const livesGroup = document.createElement('div');
@@ -568,6 +620,8 @@ export default class GameScene extends Phaser.Scene {
         restartBtn.style.fontSize = '16px';
         restartBtn.onclick = () => {
           const lives = document.getElementById('restartLives').value;
+          console.log("Tentative de redémarrage de la partie avec", lives, "vies");
+          console.log("Room ID utilisé pour le redémarrage:", this.roomId);
           this.socket.emit('restartGame', { roomId: this.roomId, lives });
           gameOverContainer.remove();
         };
@@ -593,6 +647,8 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this.socket.on("gameRestarted", (data) => {
+      console.log("Événement gameRestarted reçu:", data);
+      
       // Supprimer le conteneur de fin de partie s'il existe encore
       const existingContainer = document.querySelector('.game-over-container');
       if (existingContainer) {

@@ -80,13 +80,29 @@ export default class LobbyScene extends Phaser.Scene {
     const errorDiv = rootEle.querySelector("#errorMsg");
 
     joinBtn.onclick = () => {
-      const roomId = rootEle.querySelector("#joinRoomId").value.trim().toUpperCase();
-      if (!roomId) {
-        errorDiv.textContent = "Veuillez entrer un code de salle valide";
+      const roomInput = rootEle.querySelector("#joinRoomId").value.trim().toUpperCase();
+      console.log("Tentative de connexion à la salle:", roomInput);
+      if (!roomInput) {
+        errorDiv.textContent = "Veuillez entrer un code de salle";
         return;
       }
-      this.game.socket.emit("joinRoom", { roomId, playerName: this.playerName, peerId: this.game.peerId }, (res) => {
+      
+      // Enregistrer le roomId dans le localStorage pour la récupération en cas de problème
+      localStorage.setItem('lastRoomId', roomInput);
+      
+      // Désactiver le bouton pendant la tentative
+      joinBtn.disabled = true;
+      joinBtn.textContent = "Connexion...";
+      
+      this.game.socket.emit("joinRoom", { roomId: roomInput, playerName: this.playerName, peerId: this.game.peerId }, (res) => {
+        console.log("Réponse de joinRoom:", res);
+        // Réactiver le bouton
+        joinBtn.disabled = false;
+        joinBtn.textContent = "Rejoindre";
+        
         if (res.success) {
+          const { roomId } = res;
+          console.log("Démarrage de GameScene avec roomId:", roomId);
           this.scene.start("GameScene", { roomId, playerName: this.playerName, isHost: false });
         } else {
           errorDiv.textContent = res.message || "Impossible de rejoindre la salle";
@@ -95,11 +111,25 @@ export default class LobbyScene extends Phaser.Scene {
     };
 
     createBtn.onclick = () => {
+      console.log("Création d'une nouvelle salle avec peerId:", this.game.peerId);
       const livesVal = rootEle.querySelector("#livesVal").value.trim() || "3";
       this.game.socket.emit("createRoom", { hostName: this.playerName, lives: livesVal, peerId: this.game.peerId }, (res) => {
+        console.log("Réponse de createRoom:", res);
         if (res.success) {
           const { roomId } = res;
-          this.scene.start("GameScene", { roomId, playerName: this.playerName, isHost: true });
+          console.log("Room ID reçu:", roomId);
+          
+          // Enregistrer le roomId dans le localStorage pour la récupération en cas de problème
+          localStorage.setItem('lastRoomId', roomId);
+          
+          // Affichage du code de salle pour faciliter les tests
+          if (errorDiv) errorDiv.textContent = `Salle créée: ${roomId}`;
+          
+          // Petit délai pour s'assurer que le roomId est bien enregistré
+          setTimeout(() => {
+            console.log("Démarrage de GameScene avec roomId:", roomId);
+            this.scene.start("GameScene", { roomId, playerName: this.playerName, isHost: true });
+          }, 1000);
         } else {
           errorDiv.textContent = "Échec de la création de la salle";
         }

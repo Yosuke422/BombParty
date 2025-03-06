@@ -16,12 +16,29 @@ const socket = io();
 game.socket = socket;
 
 // Initialisation de PeerJS
-const peer = new Peer(undefined, {
-  host: 'localhost',
-  port: 9000,  // Même port que dans le serveur
-  path: '/myapp',
-  debug: 3
-});
+const isProd = window.location.hostname !== 'localhost';
+let peerConfig;
+
+if (isProd) {
+  // Configuration pour l'environnement de production (Render)
+  peerConfig = {
+    host: window.location.hostname,
+    path: '/peerjs/myapp',
+    secure: true,
+    port: 443,
+    debug: 1
+  };
+} else {
+  // Configuration pour l'environnement local
+  peerConfig = {
+    host: 'localhost',
+    port: 9000,
+    path: '/myapp',
+    debug: 3
+  };
+}
+
+const peer = new Peer(undefined, peerConfig);
 
 peer.on('open', (id) => {
   console.log('Mon Peer ID:', id);

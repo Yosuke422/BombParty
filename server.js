@@ -1,3 +1,6 @@
+// Charger les variables d'environnement
+require('dotenv').config();
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -6,24 +9,47 @@ const { v4: uuidv4 } = require("uuid");
 const { PeerServer } = require('peer');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
+// Configuration des ports
+const PORT = process.env.PORT || 3000;
+const PEER_PORT = process.env.PEER_PORT || 9000;
+const isProd = process.env.NODE_ENV === 'production';
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 // Configuration du serveur PeerJS
-const peerServer = PeerServer({
-  port: 9000,
-  path: '/myapp'
-});
+// En local, on veut un serveur PeerJS séparé sur le port 9000
+// En production sur Render, on veut utiliser le même port que l'application
 
-// Logging pour debug
-peerServer.on('connection', (client) => {
-  console.log('Nouvelle connexion PeerJS:', client.id);
-});
-
-peerServer.on('error', (error) => {
-  console.error('Erreur PeerServer:', error);
-});
+// Si nous sommes en production (sur Render par exemple)
+if (isProd) {
+  // Intégrer PeerServer dans l'application Express existante
+  app.use('/peerjs', require('peer').ExpressPeerServer(server, {
+    path: '/myapp',
+    proxied: true,
+    debug: true
+  }));
+  console.log("PeerServer intégré au serveur Express en mode production");
+} else {
+  // En local, exécuter PeerServer sur un port séparé
+  const peerServer = PeerServer({
+    port: PEER_PORT,
+    path: '/myapp',
+    proxied: false
+  });
+  
+  // Logging pour debug
+  peerServer.on('connection', (client) => {
+    console.log('Nouvelle connexion PeerJS en local:', client.id);
+  });
+  
+  peerServer.on('error', (error) => {
+    console.error('Erreur PeerServer en local:', error);
+  });
+  
+  console.log(`PeerServer indépendant démarré sur le port ${PEER_PORT}`);
+}
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -51,10 +77,16 @@ function generatePrompt() {
 
 async function validateWord(word, prompt, usedWords) {
   const lower = word.toLowerCase().trim();
+  const lowerPrompt = prompt.toLowerCase();
 
-  if (!lower.includes(prompt.toLowerCase())) {
+  if (lower === lowerPrompt) {
+    return { success: false, message: "Word cannot be exactly the prompt." };
+  }
+
+  if (!lower.includes(lowerPrompt)) {
     return { success: false, message: "Word does not contain the prompt." };
   }
+
   if (usedWords.has(lower)) {
     return { success: false, message: "Word already used this round." };
   }
@@ -76,21 +108,30 @@ async function validateWord(word, prompt, usedWords) {
   }
 }
 
-const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
 
-io.on("connection", (socket) => {
-  console.log("New client connected:", socket.id);
+// Fonction de sécurité pour traiter les roomIds
+function safeRoomId(roomId, eventName) {
+  if (!roomId) {
+    console.log(`${eventName}: appelé avec un roomId null ou undefined`);
+    return null;
+  }
+  return String(roomId).toUpperCase();
+}
 
-  socket.on("createRoom", (data, cb) => {
-    const { hostName, lives, peerId } = data;
-    let numLives = parseInt(lives) || 3;
-    if (numLives < 1) numLives = 1;
-    if (numLives > 5) numLives = 5;
+io.on("connection", (socket) => {
+  console.log("Nouveau client connecté:", socket.id);
+  console.log("Salles actuelles:", Object.keys(rooms));
+
+  socket.on("createRoom", ({ hostName, lives, peerId }, cb) => {
+    console.log(`Tentative de création de salle par ${hostName} avec peerId ${peerId}`);
+    const numLives = parseInt(lives) || 3;
 
     const roomId = generateRoomCode();
+    console.log(`Code de salle généré: ${roomId}`);
+    
     rooms[roomId] = {
       settings: {
         hostName: hostName || "Host",
@@ -115,16 +156,27 @@ io.on("connection", (socket) => {
       usedWords: new Set()
     };
 
+    console.log(`Salle ${roomId} ajoutée à la liste des salles. Total: ${Object.keys(rooms).length}`);
     socket.join(roomId);
-    console.log(`Room ${roomId} created by ${hostName} with peerId ${peerId}`);
+    console.log(`Salle ${roomId} créée par ${hostName} avec peerId ${peerId}`);
     cb({ success: true, roomId });
     io.to(roomId).emit("playerListUpdate", { players: rooms[roomId].players });
   });
 
   socket.on("joinRoom", ({ roomId, playerName, peerId }, cb) => {
-    roomId = roomId.toUpperCase();
-    const room = rooms[roomId];
+    const safeId = safeRoomId(roomId, "joinRoom");
+    if (!safeId) {
+      console.log("Tentative de rejoindre une salle avec un roomId invalide:", roomId);
+      cb({ success: false, message: "ID de salle invalide." });
+      return;
+    }
+    
+    console.log(`Tentative de connexion à la salle ${safeId} par ${playerName} avec peerId ${peerId}`);
+    console.log(`Salles existantes: ${Object.keys(rooms).join(', ')}`);
+    
+    const room = rooms[safeId];
     if (!room) {
+      console.log(`Salle ${safeId} non trouvée`);
       cb({ success: false, message: "Room not found." });
       return;
     }
@@ -145,15 +197,17 @@ io.on("connection", (socket) => {
       peerId: peerId,
       wins: 0
     });
-    socket.join(roomId);
-    console.log(`${name} joined room ${roomId}`);
+    socket.join(safeId);
+    console.log(`${name} joined room ${safeId}`);
     cb({ success: true });
-    io.to(roomId).emit("playerListUpdate", { players: room.players });
+    io.to(safeId).emit("playerListUpdate", { players: room.players });
   });
 
   socket.on("startGame", (roomId) => {
-    roomId = roomId.toUpperCase();
-    const room = rooms[roomId];
+    const safeId = safeRoomId(roomId, "startGame");
+    if (!safeId) return;
+    
+    const room = rooms[safeId];
     if (!room || room.status !== "lobby") return;
 
     if (room.players.length < 2) {
@@ -166,17 +220,19 @@ io.on("connection", (socket) => {
     room.currentPlayerIndex = 0;
     room.usedWords.clear();
 
-    io.to(roomId).emit("gameStarted", {
+    io.to(safeId).emit("gameStarted", {
       prompt: room.currentPrompt,
       currentPlayerId: room.players[0].id
     });
 
-    startTurn(roomId);
+    startTurn(safeId);
   });
 
   socket.on("submitWord", async ({ roomId, word }) => {
-    roomId = roomId.toUpperCase();
-    const room = rooms[roomId];
+    const safeId = safeRoomId(roomId, "submitWord");
+    if (!safeId) return;
+    
+    const room = rooms[safeId];
     if (!room || room.status !== "playing") return;
 
     const currentPlayer = room.players[room.currentPlayerIndex];
@@ -188,34 +244,60 @@ io.on("connection", (socket) => {
     if (result.success) {
       room.usedWords.add(word.toLowerCase());
       clearTimeout(room.bombTimer);
-      io.to(roomId).emit("wordAccepted", { playerId: socket.id, word });
-      moveToNextTurn(roomId);
+      io.to(safeId).emit("wordAccepted", { playerId: socket.id, word });
+      moveToNextTurn(safeId);
     } else {
       socket.emit("wordInvalid", { reason: result.message });
     }
   });
 
   socket.on("getPlayerList", (roomId) => {
-    roomId = roomId.toUpperCase();
-    const room = rooms[roomId];
+    const safeId = safeRoomId(roomId, "getPlayerList");
+    if (!safeId) {
+      console.log("getPlayerList appelé avec un roomId invalide:", roomId);
+      return;
+    }
+    
+    console.log(`getPlayerList: Demande de la liste des joueurs pour la salle ${safeId}`);
+    console.log(`Salles disponibles: ${Object.keys(rooms).join(', ')}`);
+    
+    const room = rooms[safeId];
     if (room) {
+      console.log(`getPlayerList: Envoi de la liste des joueurs pour la salle ${safeId}:`, room.players.map(p => p.name));
       socket.emit("playerListUpdate", { players: room.players });
+    } else {
+      console.log(`getPlayerList: Salle ${safeId} non trouvée`);
     }
   });
 
   socket.on("restartGame", ({ roomId, lives }) => {
-    roomId = roomId.toUpperCase();
-    const room = rooms[roomId];
-    if (!room) return;
+    const safeId = safeRoomId(roomId, "restartGame");
+    if (!safeId) {
+      console.log("restartGame avec un ID de salle invalide");
+      return;
+    }
+    
+    const room = rooms[safeId];
+    if (!room) {
+      console.log(`restartGame: salle ${safeId} introuvable`);
+      return;
+    }
     
     // Vérifier si la personne qui demande le restart est l'hôte
     const player = room.players.find(p => p.id === socket.id);
+    console.log("Joueur qui demande le redémarrage:", player?.name);
+    console.log("Hôte de la salle:", room.settings.hostName);
+    
     const isHost = player && player.name === room.settings.hostName;
+    console.log("Est-ce l'hôte:", isHost);
     
     if (!isHost) {
+      console.log("Redémarrage refusé: ce n'est pas l'hôte qui demande");
       socket.emit("gameError", { message: "Seul l'hôte peut redémarrer la partie" });
       return;
     }
+    
+    console.log("Redémarrage de la partie accepté");
     
     // Mettre à jour le nombre de vies si spécifié
     if (lives) {
@@ -237,29 +319,65 @@ io.on("connection", (socket) => {
     room.usedWords.clear();
     
     // Informer les clients
-    io.to(roomId).emit("gameRestarted", {
+    io.to(safeId).emit("gameRestarted", {
       livesPerPlayer: room.settings.lives,
       prompt: room.currentPrompt,
       currentPlayerId: room.players[0].id,
       players: room.players
     });
     
-    startTurn(roomId);
+    startTurn(safeId);
+  });
+
+  socket.on("leaveRoom", (roomId) => {
+    const safeId = safeRoomId(roomId, "leaveRoom");
+    if (!safeId) return;
+    
+    const room = rooms[safeId];
+    if (!room) return;
+    
+    // Trouver et retirer le joueur de la salle
+    const playerIndex = room.players.findIndex(p => p.id === socket.id);
+    if (playerIndex === -1) return;
+    
+    console.log(`Joueur ${socket.id} quitte la salle ${safeId}`);
+    socket.leave(safeId);
+    room.players.splice(playerIndex, 1);
+    
+    // Envoyer la mise à jour de la liste des joueurs aux autres joueurs
+    io.to(safeId).emit("playerListUpdate", { players: room.players });
+    
+    // Si la salle est vide, la supprimer
+    if (room.players.length === 0) {
+      delete rooms[safeId];
+      console.log(`Salle ${safeId} supprimée (plus de joueurs)`);
+    } else {
+      // Si le jeu est en cours, vérifier s'il doit être arrêté
+      if (room.status === "playing") {
+        checkForGameOver(safeId);
+      }
+    }
   });
 
   socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
+    console.log("Client déconnecté:", socket.id);
+    
+    // Parcourir toutes les salles pour trouver et retirer le joueur déconnecté
     for (const [rid, room] of Object.entries(rooms)) {
       const idx = room.players.findIndex(p => p.id === socket.id);
       if (idx !== -1) {
+        console.log(`Joueur ${socket.id} retiré de la salle ${rid} suite à la déconnexion`);
         room.players.splice(idx, 1);
         io.to(rid).emit("playerListUpdate", { players: room.players });
+        
         if (room.players.length === 0) {
           delete rooms[rid];
-          console.log(`Room ${rid} removed (no players left).`);
-        } else {
-          if (room.status === "playing") {
-            checkForGameOver(rid);
+          console.log(`Salle ${rid} supprimée (plus de joueurs après déconnexion)`);
+        } else if (room.status === "playing") {
+          // Utiliser une version sécurisée pour checkForGameOver
+          const safeRid = safeRoomId(rid, "disconnect->checkForGameOver");
+          if (safeRid) {
+            checkForGameOver(safeRid);
           }
         }
         break;
@@ -268,31 +386,31 @@ io.on("connection", (socket) => {
   });
 
   function startTurn(roomId) {
-    const room = rooms[roomId];
+    const safeId = safeRoomId(roomId, "startTurn");
+    if (!safeId) return;
+    
+    const room = rooms[safeId];
     if (!room) return;
-  
-    if (checkForGameOver(roomId)) return;
-  
+
+    if (checkForGameOver(safeId)) return;
+
     const currentPlayer = room.players[room.currentPlayerIndex];
     if (!currentPlayer.isAlive) {
-      moveToNextTurn(roomId);
+      moveToNextTurn(safeId);
       return;
     }
 
-    const minTime = 10; 
-    const maxTime = 20; 
-    const bombTime = randomInt(minTime, maxTime);
-
-    io.to(roomId).emit("turnStarted", {
+    const bombTime = randomInt(room.settings.minBombTime, room.settings.maxBombTime);
+    io.to(safeId).emit("turnStarted", {
       currentPlayerId: currentPlayer.id,
       prompt: room.currentPrompt,
       bombTime: bombTime
     });
-  
+
     room.bombTimer = setTimeout(() => {
       currentPlayer.lives -= 1;
       
-      io.to(roomId).emit("bombExploded", {
+      io.to(safeId).emit("bombExploded", {
         playerId: currentPlayer.id,
         remainingLives: currentPlayer.lives
       });
@@ -302,88 +420,103 @@ io.on("connection", (socket) => {
         console.log(`[playerEliminated] Player ${currentPlayer.name} eliminated, remaining lives: ${currentPlayer.lives}, isAlive: ${currentPlayer.isAlive}`);
         
         // On vérifie d'abord si le jeu est terminé
-        const isGameOver = checkForGameOver(roomId);
+        const isGameOver = checkForGameOver(safeId);
         
         setTimeout(() => {
-          io.to(roomId).emit("playerEliminated", { playerId: currentPlayer.id });
-          io.to(roomId).emit("playerListUpdate", { players: room.players });
+          io.to(safeId).emit("playerEliminated", { playerId: currentPlayer.id });
+          io.to(safeId).emit("playerListUpdate", { players: room.players });
           
           // Si le jeu n'est pas terminé, on passe au tour suivant
           if (!isGameOver) {
-            moveToNextTurn(roomId);
+            moveToNextTurn(safeId);
           }
         }, 500);
       } else {
-        io.to(roomId).emit("playerListUpdate", { players: room.players });
-        moveToNextTurn(roomId);
+        io.to(safeId).emit("playerListUpdate", { players: room.players });
+        moveToNextTurn(safeId);
       }
     }, bombTime * 1000);
   }
 
   function moveToNextTurn(roomId) {
-    const room = rooms[roomId];
+    const safeId = safeRoomId(roomId, "moveToNextTurn");
+    if (!safeId) return;
+    
+    const room = rooms[safeId];
     if (!room) return;
     clearTimeout(room.bombTimer);
-  
-    console.log(`[moveToNextTurn] Checking if game is over for room ${roomId}`);
-    if (checkForGameOver(roomId)) {
+
+    console.log(`[moveToNextTurn] Checking if game is over for room ${safeId}`);
+    if (checkForGameOver(safeId)) {
       console.log(`[moveToNextTurn] Game is over, not moving to next turn`);
       return;
     }
-  
-    let nextIndex = (room.currentPlayerIndex + 1) % room.players.length;
-    let safeCount = 0;
-    while (!room.players[nextIndex].isAlive && safeCount < room.players.length) {
-      nextIndex = (nextIndex + 1) % room.players.length;
-      safeCount++;
-    }
-    room.currentPlayerIndex = nextIndex;
-  
+
+    // Passer au joueur suivant qui est toujours en vie
+    let nextPlayerIndex = room.currentPlayerIndex;
+    let counter = 0;
+    
+    do {
+      nextPlayerIndex = (nextPlayerIndex + 1) % room.players.length;
+      counter++;
+      
+      // Éviter une boucle infinie si tous les joueurs sont éliminés
+      if (counter > room.players.length) {
+        console.log(`[moveToNextTurn] No alive players found after checking all players`);
+        checkForGameOver(safeId);
+        return;
+      }
+    } while (!room.players[nextPlayerIndex].isAlive);
+    
+    room.currentPlayerIndex = nextPlayerIndex;
+    
     room.currentPrompt = generatePrompt();
-    io.to(roomId).emit("nextTurn", {
+    io.to(safeId).emit("nextTurn", {
       currentPlayerId: room.players[room.currentPlayerIndex].id,
       prompt: room.currentPrompt
     });
     
-    startTurn(roomId);
+    startTurn(safeId);
   }
 
   function checkForGameOver(roomId) {
-    const room = rooms[roomId];
-    if (!room) return true;
-    if (room.status !== "playing") return true;
-  
+    const safeId = safeRoomId(roomId, "checkForGameOver");
+    if (!safeId) return false;
+    
+    const room = rooms[safeId];
+    if (!room) return false;
+    if (room.status !== "playing") return false;
+
     const alivePlayers = room.players.filter(p => p.isAlive);
-    console.log(`[checkForGameOver] Room: ${roomId}, Alive players: ${alivePlayers.length}`);
+    console.log(`[checkForGameOver] Room: ${safeId}, Alive players: ${alivePlayers.length}`);
     console.log(`[checkForGameOver] Players status:`, room.players.map(p => `${p.name}: ${p.isAlive ? 'alive' : 'eliminated'}`));
     
-    if (alivePlayers.length <= 1) {
-      room.status = "lobby";
-      clearTimeout(room.bombTimer);
-      let winnerName = "No Winner";
+    // Si un seul joueur est vivant, c'est le gagnant
+    if (alivePlayers.length === 1 && room.players.length > 1) {
+      const winner = alivePlayers[0];
+      winner.wins += 1;
       
-      if (alivePlayers.length === 1) {
-        const winner = alivePlayers[0];
-        winnerName = winner.name;
-        winner.wins += 1; // Incrémenter le nombre de victoires
-        console.log(`[checkForGameOver] Winner found: ${winnerName}`);
-      } else {
-        console.log(`[checkForGameOver] No winner found`);
-      }
+      const winnerName = winner.name;
+      console.log(`[checkForGameOver] Game over! Winner: ${winnerName}`);
+      
+      room.status = "over";
+      clearTimeout(room.bombTimer);
       
       // Envoyer les informations de fin de partie avec le tableau des scores
-      io.to(roomId).emit("gameOver", { 
+      io.to(safeId).emit("gameOver", { 
         winnerName,
         scoreboard: room.players.map(p => ({
           name: p.name,
+          isAlive: p.isAlive,
+          lives: p.lives,
           wins: p.wins,
           isHost: p.name === room.settings.hostName
         }))
       });
-      console.log(`[checkForGameOver] Game over event sent`);
       
       return true;
     }
+    
     return false;
   }
 });
