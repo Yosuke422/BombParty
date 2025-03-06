@@ -85,7 +85,7 @@ io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
   socket.on("createRoom", (data, cb) => {
-    const { hostName, lives } = data;
+    const { hostName, lives, peerId } = data;
     let numLives = parseInt(lives) || 3;
     if (numLives < 1) numLives = 1;
     if (numLives > 5) numLives = 5;
@@ -104,6 +104,7 @@ io.on("connection", (socket) => {
           name: hostName || "Host",
           lives: numLives,
           isAlive: true,
+          peerId: peerId,
           wins: 0
         }
       ],
@@ -115,7 +116,7 @@ io.on("connection", (socket) => {
     };
 
     socket.join(roomId);
-    console.log(`Room ${roomId} created by ${hostName}`);
+    console.log(`Room ${roomId} created by ${hostName} with peerId ${peerId}`);
     cb({ success: true, roomId });
     io.to(roomId).emit("playerListUpdate", { players: rooms[roomId].players });
   });

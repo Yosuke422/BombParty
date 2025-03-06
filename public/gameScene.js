@@ -12,6 +12,7 @@ export default class GameScene extends Phaser.Scene {
     this.peerConnections = new Map();
     this.tickTimer = null;
     this.currentBombTime = 0;
+    this.messagesSeen = new Set(); // Pour éviter les doublons
 
     // Gestion des connexions entrantes (pour le host ou tous les pairs)
     this.peer.on('connection', (conn) => {
@@ -48,12 +49,22 @@ export default class GameScene extends Phaser.Scene {
   
         console.log('Message reçu sur connexion entrante:', messageData);
         if (messageData && messageData.type === 'chat') {
-          this.addChatMessage(messageData.sender, messageData.message, messageData.time);
+          // Créer un identifiant unique pour le message
+          const msgId = `${messageData.sender}-${messageData.time}-${messageData.message}`;
+          
+          // Vérifier si on a déjà vu ce message
+          if (!this.messagesSeen.has(msgId)) {
+            this.messagesSeen.add(msgId);
+            this.addChatMessage(messageData.sender, messageData.message, messageData.time);
+            
+            // Relayer le message aux autres joueurs (pour que tout le monde le voie)
+            this.relayMessageToOthers(messageData, conn.peer);
+          }
         }
       });
 
       conn.on('open', () => {
-        console.log('Connexion entrante ouverte');
+        console.log('Connexion entrante ouverte avec peer ID:', conn.peer);
         // On stocke la connexion avec la clé correspondant au peerId distant
         this.peerConnections.set(conn.peer, conn);
       });
@@ -231,8 +242,15 @@ export default class GameScene extends Phaser.Scene {
           message: message,
           time: new Date().toLocaleTimeString()
         };
+        
+        // Créer un identifiant unique pour le message
+        const msgId = `${messageData.sender}-${messageData.time}-${messageData.message}`;
+        this.messagesSeen.add(msgId);
+        
+        // Afficher le message localement
         this.addChatMessage(messageData.sender, messageData.message, messageData.time);
-        // Envoi aux pairs
+        
+        // Envoi aux autres joueurs
         this.peerConnections.forEach((conn) => {
           if (conn.open) {
             console.log('Envoi du message à:', conn.peer);
@@ -309,15 +327,17 @@ export default class GameScene extends Phaser.Scene {
       
       console.log("Liste des joueurs mise à jour:", data.players);
       
+      // Établir des connexions P2P avec tous les joueurs qui ont un peerId
       data.players.forEach(player => {
         if (
-          player.id !== this.socket.id &&
-          !this.peerConnections.has(player.id) &&
-          player.peerId
+          player.id !== this.socket.id && // On ne se connecte pas à soi-même
+          player.peerId && // Le joueur doit avoir un peerId
+          !this.peerConnections.has(player.peerId) // On n'établit pas de connexion si elle existe déjà
         ) {
           console.log("Tentative de connexion avec:", player.name, player.peerId);
           try {
             const conn = this.peer.connect(player.peerId);
+            
             conn.on('data', (data) => {
               let parsedData = null;
               if (data instanceof ArrayBuffer) {
@@ -339,25 +359,42 @@ export default class GameScene extends Phaser.Scene {
               } else if (typeof data === 'object') {
                 parsedData = data;
               }
-  
+
               console.log('Message reçu de', player.name, ':', parsedData);
               if (parsedData && parsedData.type === 'chat') {
-                this.addChatMessage(parsedData.sender, parsedData.message, parsedData.time);
+                // Créer un identifiant unique pour le message
+                const msgId = `${parsedData.sender}-${parsedData.time}-${parsedData.message}`;
+                
+                // Vérifier si on a déjà vu ce message
+                if (!this.messagesSeen.has(msgId)) {
+                  this.messagesSeen.add(msgId);
+                  this.addChatMessage(parsedData.sender, parsedData.message, parsedData.time);
+                  
+                  // Relayer le message aux autres joueurs
+                  this.relayMessageToOthers(parsedData, player.peerId);
+                }
               }
             });
-  
+
             conn.on('open', () => {
-              console.log('Connexion établie avec:', player.name);
-              this.peerConnections.set(player.id, conn);
+              console.log('Connexion sortante établie avec:', player.name, player.peerId);
+              this.peerConnections.set(player.peerId, conn);
+              
+              // Envoyer un message de bienvenue
               const messageData = {
                 type: 'chat',
                 sender: this.playerName,
                 message: '👋 Connecté!',
                 time: new Date().toLocaleTimeString()
               };
+              
+              // Ajouter à la liste des messages vus pour éviter les duplications
+              const msgId = `${messageData.sender}-${messageData.time}-${messageData.message}`;
+              this.messagesSeen.add(msgId);
+              
               conn.send(JSON.stringify(messageData));
             });
-  
+
             conn.on('error', (err) => {
               console.error('Erreur de connexion avec', player.name, ':', err);
             });
@@ -682,5 +719,19 @@ export default class GameScene extends Phaser.Scene {
     if (chatContainer) {
       chatContainer.remove();
     }
+  }
+
+  // Méthode pour relayer un message aux autres joueurs (sauf à l'expéditeur original)
+  relayMessageToOthers(messageData, senderPeerId) {
+    this.peerConnections.forEach((conn, peerId) => {
+      if (peerId !== senderPeerId && conn.open) {
+        try {
+          console.log('Relais du message à:', peerId);
+          conn.send(JSON.stringify(messageData));
+        } catch (err) {
+          console.error('Erreur lors du relais du message:', err);
+        }
+      }
+    });
   }
 }
