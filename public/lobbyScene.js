@@ -13,7 +13,7 @@ export default class LobbyScene extends Phaser.Scene {
       this.cameras.main.centerY
     ).createFromHTML(`
       <div class="lobby-container" id="nameContainer">
-        <h1>Bomb Party Clone</h1>
+        <h1>Bomb Party</h1>
         
         <input type="text" id="playerName" placeholder="Entrez votre nom" />
         <button id="confirmNameBtn">Confirmer</button>
