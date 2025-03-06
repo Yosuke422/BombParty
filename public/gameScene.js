@@ -705,11 +705,21 @@ export default class GameScene extends Phaser.Scene {
     const chatMessages = document.querySelector('.chat-messages');
     const messageElement = document.createElement('div');
     messageElement.className = 'chat-message';
+    
+    // Déterminer si c'est un message de l'utilisateur actuel
+    const isOwnMessage = sender === this.playerName;
+    
+    // Ajouter une classe supplémentaire si c'est un message de l'utilisateur actuel
+    if (isOwnMessage) {
+      messageElement.classList.add('own-message');
+    }
+    
     messageElement.innerHTML = `
       <span class="time">[${time}]</span>
       <span class="sender">${sender}:</span>
       <span class="message">${message}</span>
     `;
+    
     chatMessages.appendChild(messageElement);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }

@@ -307,6 +307,19 @@ html, body {
   margin-right: 5px;
 }
 
+/* Style pour les messages de l'utilisateur actuel */
+.chat-message.own-message {
+  background-color: rgba(75, 83, 255, 0.2);
+  border-radius: 8px;
+  padding: 5px 8px;
+  margin-left: 10px;
+  margin-right: -5px;
+}
+
+.chat-message.own-message .sender {
+  color: #4b53ff;  /* Bleu pour les messages de l'utilisateur */
+}
+
 /* Style pour le scrollbar du chat */
 .chat-messages::-webkit-scrollbar {
   width: 6px;
